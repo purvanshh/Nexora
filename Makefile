@@ -24,6 +24,6 @@ chaos-demo:
 	CHAOS=1 bash scripts/run_demo.sh
 
 secondary:
-	uv run python cli.py "Look up employee 42, get their latest payslip, and tell me their net pay."
+	bash scripts/run_demo.sh "Look up employee 42, get their latest payslip, and tell me their net pay."
 
 reset: seed

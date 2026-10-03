@@ -51,8 +51,8 @@ def build_prompt(
             "role": "user",
             "content": (
                 f"Task: {memory.task}\n\n"
-                "Decide the next action. Use a tool, remember a fact, ask the user, "
-                "or finish when done."
+                "Call exactly one tool now. Prefer `api` for mail/finance/HR. "
+                "After you have amount + due_date, POST /api/invoices, then `finish`."
             ),
         }
     ]
@@ -70,13 +70,20 @@ def build_prompt(
                     ),
                 }
             )
+        elif thought:
+            messages.append({"role": "assistant", "content": f"Thought: {thought}"})
         if step.observation:
+            dump = step.observation.model_dump()
+            # Keep prompts small so the model keeps using tool calls.
+            raw = json.dumps(dump, default=str)
+            if len(raw) > 2500:
+                raw = raw[:2500] + "...(truncated)"
             messages.append(
                 {
                     "role": "user",
                     "content": (
-                        f"Observation(ok={step.observation.ok}): "
-                        f"{json.dumps(step.observation.model_dump(), default=str)}"
+                        f"Observation(ok={step.observation.ok}): {raw}\n\n"
+                        "Continue: call the next tool (remember / api / browser / finish)."
                     ),
                 }
             )
@@ -104,7 +111,8 @@ class OpenAILLMClient:
         }
         if tools:
             kwargs["tools"] = tools
-            kwargs["tool_choice"] = "auto"
+            # Force a function call every turn — free-text replies stall the loop.
+            kwargs["tool_choice"] = "required"
 
         response = await self.client.chat.completions.create(**kwargs)
         latency_ms = int((time.perf_counter() - started) * 1000)

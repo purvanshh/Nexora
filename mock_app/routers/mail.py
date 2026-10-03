@@ -42,8 +42,12 @@ async def email_page(request: Request, mail_id: str) -> HTMLResponse:
 
 
 @router.get("/api/mail")
-async def list_mail() -> list[dict]:
-    return _emails_sorted()
+async def list_mail(sender: str | None = None) -> list[dict]:
+    emails = _emails_sorted()
+    if sender:
+        sender_l = sender.lower()
+        emails = [e for e in emails if sender_l in str(e.get("sender", "")).lower()]
+    return emails
 
 
 @router.get("/api/mail/{mail_id}")

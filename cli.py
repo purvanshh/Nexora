@@ -34,6 +34,12 @@ def main(
     """Run one autonomous task against the local mock environment."""
     reset_settings()
     settings = get_settings()
+    if not settings.openai_api_key or settings.openai_api_key.startswith("sk-..."):
+        console.print(
+            "[red]Missing OPENAI_API_KEY.[/red] Put your key in `.env` at the repo root "
+            "(see `.env.example`), then re-run."
+        )
+        raise typer.Exit(code=2)
     if no_headless:
         settings.headless = False
     if model:

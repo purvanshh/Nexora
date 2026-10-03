@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "id": "fin-e4c613e2",
+    "invoice_id": "INV-4471",
+    "sender": "Acme Corp",
+    "amount": 1250.0,
+    "due_date": "2025-03-15",
+    "source_mail_id": null,
+    "notes": null
+  }
+]
