@@ -22,9 +22,11 @@ workspace/*
 !workspace/.gitkeep
 traces/*
 !traces/.gitkeep
+!traces/primary_clean.jsonl
+!traces/primary_chaos_retry.jsonl
+!traces/secondary_payslip.jsonl
 !traces/primary_happy.jsonl
 !traces/primary_with_retry.jsonl
-!traces/secondary_payslip.jsonl
 traces/*/
 
 # IDE / OS
