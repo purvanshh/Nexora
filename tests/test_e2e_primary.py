@@ -98,19 +98,16 @@ async def test_e2e_primary_stubbed_llm(
     )
     registry = get_default_registry(
         settings,
-        ask_callback=lambda q, o: "continue",
+        ask_callback=lambda q, o: "abort",
         evidence_dir=tmp_path / "shots",
     )
     llm = StubLLMClient(_script())
-    try:
-        result = await run(
-            PRIMARY,
-            llm=llm,
-            registry=registry,
-            settings=settings,
-        )
-    finally:
-        await registry.aclose()
+    result = await run(
+        PRIMARY,
+        llm=llm,
+        registry=registry,
+        settings=settings,
+    )
 
     assert result.status == "success"
     assert result.verification is not None

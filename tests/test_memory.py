@@ -27,3 +27,20 @@ def test_consecutive_identical_failures() -> None:
     mem.add_step(0, "t", call, Observation(ok=False, error="boom"))
     mem.add_step(1, "t", call, Observation(ok=False, error="boom"))
     assert mem.consecutive_identical_failures()
+
+
+def test_no_progress_counter() -> None:
+    mem = Memory(task="t")
+    mem.mark_progress(made_progress=False)
+    mem.mark_progress(made_progress=False)
+    mem.mark_progress(made_progress=False)
+    assert mem.consecutive_no_progress == 3
+    mem.mark_progress(made_progress=True)
+    assert mem.consecutive_no_progress == 0
+
+
+def test_required_facts_payslip() -> None:
+    mem = Memory(task="Look up employee 42 payslip net pay")
+    mem.remember("employee_id", 42, 0)
+    mem.remember("net_pay", 5412.8, 1)
+    assert mem.required_facts_present() is True

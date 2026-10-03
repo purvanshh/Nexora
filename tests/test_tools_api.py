@@ -66,3 +66,48 @@ async def test_api_create_invoice_201(mock_app: str) -> None:
     assert obs.data is not None
     assert obs.data["status_code"] == 201
     assert obs.data["body"]["amount"] == 1250.0
+
+
+@pytest.mark.asyncio
+async def test_chaos_first_post_500_then_201(mock_app: str, monkeypatch) -> None:
+    """CHAOS=1 must inject a 500 on the first invoice POST, then allow retry."""
+    import os
+
+    from mock_app.routers.finance import reset_chaos
+
+    monkeypatch.setenv("CHAOS", "1")
+    reset_chaos()
+    # The live uvicorn process won't see monkeypatch — hit the app via TestClient-style
+    # by calling the route logic through httpx only works if server has CHAOS.
+    # Restart is heavy; instead unit-test the handler env read via direct ASGI transport.
+    from httpx import ASGITransport, AsyncClient
+
+    from mock_app.main import app
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reset_chaos()
+        os.environ["CHAOS"] = "1"
+        first = await client.post(
+            "/api/invoices",
+            json={
+                "sender": "Acme Corp",
+                "amount": 1250.0,
+                "due_date": "2025-03-15",
+                "invoice_id": "INV-4471",
+            },
+        )
+        assert first.status_code == 500
+        assert first.json().get("chaos") is True
+        second = await client.post(
+            "/api/invoices",
+            json={
+                "sender": "Acme Corp",
+                "amount": 1250.0,
+                "due_date": "2025-03-15",
+                "invoice_id": "INV-4471",
+            },
+        )
+        assert second.status_code == 201
+    monkeypatch.delenv("CHAOS", raising=False)
+    reset_chaos()

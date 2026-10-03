@@ -72,12 +72,19 @@ async def get_invoice(invoice_id: str) -> dict[str, Any]:
 
 @router.post("/api/invoices")
 async def create_invoice(payload: InvoiceCreate) -> JSONResponse:
+    """Create an invoice. When CHAOS=1, the first POST returns 500 (read per-request)."""
     global _chaos_posts
-    if os.getenv("CHAOS", "0") == "1" and _chaos_posts == 0:
+    # Read env on every request so demo scripts can inject CHAOS after import.
+    chaos_on = os.environ.get("CHAOS", "0").strip() == "1"
+    if chaos_on and _chaos_posts == 0:
         _chaos_posts += 1
         return JSONResponse(
             status_code=500,
-            content={"detail": "Injected chaos failure on first POST"},
+            content={
+                "detail": "Injected chaos failure on first POST",
+                "chaos": True,
+                "hint": "retry the same request",
+            },
         )
 
     if payload.amount <= 0:

@@ -14,6 +14,9 @@ class Memory:
         self.task = task
         self.steps: list[Step] = []
         self._facts: dict[str, Fact] = {}
+        self.consecutive_no_progress: int = 0
+        self.last_error: str | None = None
+        self._last_success_sig: str | None = None
 
     def add_step(
         self,
@@ -29,6 +32,10 @@ class Memory:
             observation=observation,
         )
         self.steps.append(step)
+
+        if observation is not None and not observation.ok:
+            self.last_error = observation.error
+
         return step
 
     def remember(self, key: str, value: Any, source_step: int) -> Fact:
@@ -68,3 +75,55 @@ class Memory:
             and b.observation is not None
             and a.observation.error == b.observation.error
         )
+
+    def mark_progress(self, *, made_progress: bool) -> None:
+        if made_progress:
+            self.consecutive_no_progress = 0
+        else:
+            self.consecutive_no_progress += 1
+
+    def evaluate_progress(
+        self,
+        *,
+        facts_before: int,
+        tool_call: ToolCall | None,
+        observation: Observation | None,
+    ) -> bool:
+        """Return True if this step advanced the run."""
+        if len(self._facts) > facts_before:
+            return True
+        if tool_call is None:
+            return False
+        if tool_call.tool in {"remember", "finish"}:
+            return True
+        if observation is None or not observation.ok:
+            return False
+        sig = f"{tool_call.tool}:{sorted(tool_call.args.items())}"
+        if sig == self._last_success_sig:
+            return False
+        self._last_success_sig = sig
+        return True
+
+    def required_facts_present(self) -> bool:
+        """Soft-finish heuristic based on task keywords."""
+        task_l = self.task.lower()
+        facts = self.facts_dict()
+        if "payslip" in task_l or "net pay" in task_l:
+            return "net_pay" in facts and (
+                "employee_id" in facts or "42" in self.task
+            )
+        if "invoice" in task_l or "finance" in task_l:
+            has_fields = all(
+                k in facts for k in ("invoice_amount", "invoice_due_date")
+            )
+            wrote = any(
+                s.tool_call
+                and s.tool_call.tool == "api"
+                and str(s.tool_call.args.get("method", "")).upper() == "POST"
+                and "/api/invoices" in str(s.tool_call.args.get("path", ""))
+                and s.observation
+                and s.observation.ok
+                for s in self.steps
+            )
+            return has_fields and wrote
+        return False

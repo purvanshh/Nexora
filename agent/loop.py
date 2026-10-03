@@ -8,10 +8,11 @@ from typing import Any
 from uuid import uuid4
 
 from agent.config import Settings, get_settings
-from agent.errors import EscalationNeeded
+from agent.health import check_mock_app
 from agent.memory import Memory
 from agent.models import LLMResponse, Observation, RunResult, ToolCall
 from agent.planner import LLMClient, OpenAILLMClient, build_prompt
+from agent.tools.ask_user import MENU_OPTIONS
 from agent.tools.registry import ToolRegistry, get_default_registry
 from agent.tracer import Tracer
 from agent.verifier import Verifier
@@ -42,7 +43,47 @@ async def execute_with_retry(
 
 
 def should_escalate(memory: Memory) -> bool:
-    return memory.consecutive_identical_failures()
+    return memory.consecutive_identical_failures() or memory.consecutive_no_progress >= 3
+
+
+async def _escalate(
+    *,
+    registry: ToolRegistry,
+    memory: Memory,
+    tracer: Tracer,
+    step_idx: int,
+    reason: str,
+) -> str | None:
+    """Ask the user via constrained menu. Returns normalized action or None."""
+    escalate_call = ToolCall(
+        tool="ask_user",
+        args={
+            "question": (
+                f"{reason} Here's what I have: {memory.facts_dict()}. "
+                f"Last error: {memory.last_error}."
+            ),
+            "options": list(MENU_OPTIONS),
+        },
+        reasoning="escalation",
+    )
+    esc_obs = await execute_with_retry(
+        registry,
+        escalate_call,
+        retries=0,
+        tracer=tracer,
+        step_idx=step_idx,
+    )
+    memory.add_step(step_idx, "Escalating to user", escalate_call, esc_obs)
+    tracer.log_observation(step_idx, esc_obs)
+    if esc_obs.data:
+        tracer.log_user_answer(
+            step_idx,
+            str(esc_obs.data.get("question", "")),
+            str(esc_obs.data.get("answer", "")),
+            esc_obs.data.get("normalized"),
+        )
+        return esc_obs.data.get("normalized")
+    return None
 
 
 async def run(
@@ -54,6 +95,7 @@ async def run(
     settings: Settings | None = None,
     tracer: Tracer | None = None,
     ask_callback: Any | None = None,
+    skip_health_check: bool = False,
 ) -> RunResult:
     settings = settings or get_settings()
     max_steps = max_steps or settings.agent_max_steps
@@ -62,13 +104,32 @@ async def run(
     owns_tracer = tracer is None
     tracer = tracer or Tracer(run_id=uuid4().hex[:12], trace_dir=settings.trace_dir)
 
+    if not skip_health_check:
+        await check_mock_app(settings)
+
     memory = Memory(task=task)
     started = datetime.now(UTC)
     tracer.log_run_start(task, settings.agent_model)
     final_summary = ""
+    aborted = False
 
     try:
         for step_idx in range(max_steps):
+            # Soft finish: required facts present and a verifier pass would succeed.
+            if memory.required_facts_present() and step_idx > 0:
+                soft = await Verifier(settings).verify(task, memory, summary="soft-check")
+                if soft.passed:
+                    final_summary = (
+                        f"Completed with available facts: {memory.facts_dict()}"
+                    )
+                    memory.add_step(
+                        step_idx,
+                        "Soft finish: verifier would pass on current state",
+                        ToolCall(tool="finish", args={"summary": final_summary}),
+                        Observation(ok=True, data={"soft_finish": True}),
+                    )
+                    break
+
             tools_schema = registry.openai_schemas()
             system, messages = build_prompt(memory, tools_schema)
             response: LLMResponse = await llm.chat(
@@ -89,19 +150,40 @@ async def run(
                 break
 
             if response.tool_call is None:
-                # Model returned prose without a tool — nudge via memory as a failed step
                 obs = Observation(
                     ok=False,
                     error="Planner returned no tool call; please call a tool or finish.",
                 )
+                facts_before = len(memory.facts)
                 memory.add_step(step_idx, response.thought, None, obs)
                 tracer.log_observation(step_idx, obs)
+                memory.mark_progress(
+                    made_progress=memory.evaluate_progress(
+                        facts_before=facts_before,
+                        tool_call=None,
+                        observation=obs,
+                    )
+                )
+                if should_escalate(memory):
+                    action = await _escalate(
+                        registry=registry,
+                        memory=memory,
+                        tracer=tracer,
+                        step_idx=step_idx,
+                        reason="I'm not making progress.",
+                    )
+                    if action == "abort":
+                        aborted = True
+                        final_summary = "Aborted after user escalation."
+                        break
+                    if action == "skip":
+                        break
                 continue
 
             tool_call = response.tool_call
             tracer.log_thought(step_idx, response.thought, tool_call)
+            facts_before = len(memory.facts)
 
-            # Internal remember action
             if tool_call.tool == "remember":
                 key = str(tool_call.args.get("key", ""))
                 value = tool_call.args.get("value")
@@ -110,12 +192,23 @@ async def run(
                 obs = Observation(ok=True, data={"key": key, "value": value})
                 memory.add_step(step_idx, response.thought, tool_call, obs)
                 tracer.log_observation(step_idx, obs)
+                memory.mark_progress(made_progress=True)
                 continue
 
             if tool_call.tool == "finish":
                 final_summary = str(tool_call.args.get("summary", response.thought))
                 memory.add_step(step_idx, response.thought, tool_call, None)
                 break
+
+            if tool_call.tool == "ask_user":
+                # Ensure menu options are always present.
+                args = dict(tool_call.args)
+                args.setdefault("options", list(MENU_OPTIONS))
+                tool_call = ToolCall(
+                    tool="ask_user",
+                    args=args,
+                    reasoning=tool_call.reasoning,
+                )
 
             obs = await execute_with_retry(
                 registry,
@@ -127,39 +220,41 @@ async def run(
             memory.add_step(step_idx, response.thought, tool_call, obs)
             tracer.log_observation(step_idx, obs)
 
+            if tool_call.tool == "ask_user" and obs.data:
+                tracer.log_user_answer(
+                    step_idx,
+                    str(obs.data.get("question", "")),
+                    str(obs.data.get("answer", "")),
+                    obs.data.get("normalized"),
+                )
+                if obs.data.get("normalized") == "abort":
+                    aborted = True
+                    final_summary = "Aborted after user escalation."
+                    break
+
+            made = memory.evaluate_progress(
+                facts_before=facts_before,
+                tool_call=tool_call,
+                observation=obs,
+            )
+            memory.mark_progress(made_progress=made)
+
             if should_escalate(memory):
-                try:
-                    escalate_call = ToolCall(
-                        tool="ask_user",
-                        args={
-                            "question": (
-                                "I'm stuck after repeated identical failures. "
-                                f"Last error: {obs.error}. How should I proceed?"
-                            )
-                        },
-                        reasoning="escalation after identical failures",
-                    )
-                    esc_obs = await execute_with_retry(
-                        registry,
-                        escalate_call,
-                        retries=0,
-                        tracer=tracer,
-                        step_idx=step_idx,
-                    )
-                    memory.add_step(
-                        step_idx,
-                        "Escalating to user after repeated failures",
-                        escalate_call,
-                        esc_obs,
-                    )
-                    tracer.log_observation(step_idx, esc_obs)
-                except EscalationNeeded as exc:
-                    memory.add_step(
-                        step_idx,
-                        f"Escalation needed: {exc.question}",
-                        None,
-                        Observation(ok=False, error=str(exc)),
-                    )
+                action = await _escalate(
+                    registry=registry,
+                    memory=memory,
+                    tracer=tracer,
+                    step_idx=step_idx,
+                    reason="I'm stuck after repeated failures or no progress.",
+                )
+                if action == "abort":
+                    aborted = True
+                    final_summary = "Aborted after user escalation."
+                    break
+                if action == "skip":
+                    break
+                if action == "retry":
+                    memory.consecutive_no_progress = 0
 
         if not final_summary:
             final_summary = (
@@ -180,7 +275,9 @@ async def run(
             if step.observation:
                 evidence.extend(step.observation.evidence)
 
-        if verification.passed and memory.steps:
+        if aborted:
+            status = "failed"
+        elif verification.passed and memory.steps:
             status = "success"
         elif memory.steps:
             status = "partial"
@@ -204,3 +301,4 @@ async def run(
     finally:
         if owns_tracer:
             tracer.close()
+        await registry.aclose()

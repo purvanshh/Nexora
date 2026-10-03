@@ -74,6 +74,21 @@ class Tracer:
     def log_error(self, step: int, error: str, retry: int) -> None:
         self._emit("error", step=step, error=error, retry=retry)
 
+    def log_user_answer(
+        self,
+        step: int,
+        question: str,
+        answer: str,
+        normalized: str | None = None,
+    ) -> None:
+        self._emit(
+            "user_answer",
+            step=step,
+            question=question,
+            answer=answer,
+            normalized=normalized,
+        )
+
     def log_verification(self, passed: bool, checks: list[str], details: dict[str, Any]) -> None:
         self._emit("verification", passed=passed, checks=checks, details=details)
 
