@@ -1,8 +1,8 @@
-"""Independent verification — never trust the executor's claim alone."""
+"""Independent verification — re-derive truth; reject out-of-scope writes."""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -10,84 +10,235 @@ from agent.config import Settings, get_settings
 from agent.memory import Memory
 from agent.models import VerificationResult
 
+TaskKind = Literal["invoice", "payslip", "other"]
+
+
+def classify_task(task: str) -> TaskKind:
+    task_l = task.lower()
+    if "payslip" in task_l or "net pay" in task_l or (
+        "employee" in task_l and "invoice" not in task_l
+    ):
+        return "payslip"
+    if "invoice" in task_l or "finance" in task_l or "acme" in task_l:
+        return "invoice"
+    return "other"
+
+
+def extract_mutations(memory: Memory) -> list[dict[str, Any]]:
+    """Collect write-like tool calls from the run history."""
+    mutations: list[dict[str, Any]] = []
+    for step in memory.steps:
+        tc = step.tool_call
+        if tc is None:
+            continue
+        if tc.tool == "api":
+            method = str(tc.args.get("method", "GET")).upper()
+            path = str(tc.args.get("path", ""))
+            if method in {"POST", "PUT", "PATCH", "DELETE"}:
+                mutations.append(
+                    {
+                        "step": step.index,
+                        "tool": "api",
+                        "method": method,
+                        "path": path,
+                        "ok": bool(step.observation and step.observation.ok),
+                    }
+                )
+        elif tc.tool == "files" and tc.args.get("action") == "write":
+            mutations.append(
+                {
+                    "step": step.index,
+                    "tool": "files",
+                    "method": "WRITE",
+                    "path": tc.args.get("path"),
+                    "ok": bool(step.observation and step.observation.ok),
+                }
+            )
+        elif tc.tool == "browser" and tc.args.get("action") in {"fill", "click"}:
+            # Treat interactive UI mutations as writes for scope analysis.
+            mutations.append(
+                {
+                    "step": step.index,
+                    "tool": "browser",
+                    "method": str(tc.args.get("action")).upper(),
+                    "path": tc.args.get("selector") or tc.args.get("url"),
+                    "ok": bool(step.observation and step.observation.ok),
+                }
+            )
+    return mutations
+
+
+def scope_allows(kind: TaskKind, mutations: list[dict[str, Any]]) -> tuple[bool, list[str]]:
+    """Return (ok, violation reasons)."""
+    violations: list[str] = []
+    if kind == "payslip":
+        for m in mutations:
+            if m["tool"] == "api" and m["method"] != "GET":
+                violations.append(
+                    f"scope_violation: {m['method']} {m['path']} not allowed for read-only task"
+                )
+            elif m["tool"] == "files":
+                violations.append(f"scope_violation: file write {m['path']} not allowed")
+            elif m["tool"] == "browser" and m["method"] in {"FILL", "CLICK"}:
+                # Read-only payslip should not submit forms.
+                violations.append(
+                    f"scope_violation: browser {m['method']} not allowed for read-only task"
+                )
+    elif kind == "invoice":
+        for m in mutations:
+            if m["tool"] == "api":
+                path = str(m.get("path") or "")
+                if m["method"] == "POST" and "/api/invoices" in path:
+                    continue
+                if m["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
+                    violations.append(
+                        f"scope_violation: unexpected {m['method']} {path}"
+                    )
+            elif m["tool"] == "files":
+                violations.append(f"scope_violation: unexpected file write {m['path']}")
+    return (len(violations) == 0, violations)
+
 
 class Verifier:
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or get_settings()
 
     async def verify(self, task: str, memory: Memory, summary: str = "") -> VerificationResult:
-        facts = memory.facts_dict()
-        task_l = task.lower()
+        kind = classify_task(task)
+        mutations = extract_mutations(memory)
+        scope_ok, violations = scope_allows(kind, mutations)
+        checks: list[str] = [
+            f"no_out_of_scope_writes: {'passed' if scope_ok else 'failed'}",
+        ]
+        details: dict[str, Any] = {
+            "task": task,
+            "task_kind": kind,
+            "summary": summary,
+            "facts": memory.facts_dict(),
+            "mutations": mutations,
+            "scope_violations": violations,
+        }
 
-        if "payslip" in task_l or "employee" in task_l or "net pay" in task_l:
-            return await self._verify_payslip(facts, task, summary)
+        if not scope_ok:
+            checks.extend(violations)
+            return VerificationResult(
+                passed=False,
+                checks=checks,
+                details=details,
+                method="scope_check+api_requery",
+            )
 
-        return await self._verify_invoice(facts, task, summary)
+        if kind == "payslip":
+            outcome = await self._verify_payslip(task, memory, details, checks)
+        elif kind == "invoice":
+            outcome = await self._verify_invoice(task, memory, details, checks)
+        else:
+            checks.append("Unknown task kind; skipped deep verification")
+            outcome = VerificationResult(
+                passed=False,
+                checks=checks,
+                details=details,
+                method="api_requery",
+            )
+        return outcome
 
     async def _verify_invoice(
         self,
-        facts: dict[str, Any],
         task: str,
-        summary: str,
+        memory: Memory,
+        details: dict[str, Any],
+        checks: list[str],
     ) -> VerificationResult:
-        checks: list[str] = []
-        details: dict[str, Any] = {"task": task, "summary": summary, "facts": facts}
-        amount = facts.get("invoice_amount")
-        due_date = facts.get("invoice_due_date")
-        sender = facts.get("sender") or facts.get("invoice_sender") or "Acme Corp"
-        invoice_id = facts.get("invoice_id") or facts.get("finance_invoice_id")
+        facts = memory.facts_dict()
+        claimed_amount = facts.get("invoice_amount")
+        claimed_due = facts.get("invoice_due_date")
 
         async with httpx.AsyncClient(base_url=self.settings.base_url, timeout=15.0) as client:
-            if invoice_id:
-                checks.append(f"GET /api/invoices/{invoice_id}")
-                resp = await client.get(f"/api/invoices/{invoice_id}")
-                details["by_id"] = {"status": resp.status_code, "body": _safe_json(resp)}
-                if resp.status_code == 200:
-                    body = resp.json()
-                    passed = _amounts_match(body.get("amount"), amount) and (
-                        due_date is None or str(body.get("due_date")) == str(due_date)
-                    )
-                    checks.append("Compared amount and due_date against scratchpad facts")
-                    details["comparison"] = {
-                        "expected_amount": amount,
-                        "actual_amount": body.get("amount"),
-                        "expected_due_date": due_date,
-                        "actual_due_date": body.get("due_date"),
-                    }
-                    return VerificationResult(
-                        passed=passed,
-                        checks=checks,
-                        details=details,
-                        method="api_requery",
-                    )
-
-            checks.append(f"GET /api/invoices?sender={sender}")
-            resp = await client.get("/api/invoices", params={"sender": sender})
-            details["list"] = {"status": resp.status_code, "body": _safe_json(resp)}
-            if resp.status_code != 200:
+            # 1) Independently derive the latest Acme invoice from mail.
+            checks.append("GET /api/mail?sender=Acme Corp (independent ground truth)")
+            mail_resp = await client.get("/api/mail", params={"sender": "Acme Corp"})
+            details["mail"] = {"status": mail_resp.status_code, "body": _safe_json(mail_resp)}
+            if mail_resp.status_code != 200:
                 return VerificationResult(
                     passed=False,
-                    checks=checks + ["Finance list endpoint failed"],
+                    checks=checks + ["Mail ground-truth query failed"],
+                    details=details,
+                    method="api_requery",
+                )
+            emails = mail_resp.json()
+            ground = None
+            for email in emails:  # already newest-first
+                if email.get("malformed"):
+                    continue
+                if email.get("amount") is None:
+                    continue
+                ground = email
+                break
+            details["ground_truth_mail"] = ground
+            if ground is None:
+                return VerificationResult(
+                    passed=False,
+                    checks=checks + ["No valid Acme invoice email found"],
                     details=details,
                     method="api_requery",
                 )
 
-            invoices = resp.json()
-            if not isinstance(invoices, list):
-                invoices = invoices.get("items", [])
+            gt_amount = ground.get("amount")
+            gt_due = ground.get("due_date")
+            checks.append(
+                f"Derived latest Acme invoice {ground.get('invoice_id')} "
+                f"amount={gt_amount} due={gt_due}"
+            )
 
+            # 2) Confirm finance state matches ground truth.
+            checks.append("GET /api/invoices?sender=Acme")
+            inv_resp = await client.get("/api/invoices", params={"sender": "Acme"})
+            details["finance_list"] = {
+                "status": inv_resp.status_code,
+                "body": _safe_json(inv_resp),
+            }
+            if inv_resp.status_code != 200:
+                return VerificationResult(
+                    passed=False,
+                    checks=checks + ["Finance list query failed"],
+                    details=details,
+                    method="api_requery",
+                )
+            invoices = inv_resp.json()
             match = None
             for inv in invoices:
-                if _amounts_match(inv.get("amount"), amount) and (
-                    due_date is None or str(inv.get("due_date")) == str(due_date)
-                ):
+                if _amounts_match(inv.get("amount"), gt_amount) and str(
+                    inv.get("due_date")
+                ) == str(gt_due):
                     match = inv
                     break
+            details["finance_match"] = match
+            checks.append(
+                "Finance record matches independently derived amount/due_date"
+                if match
+                else "No finance record matching ground-truth amount/due_date"
+            )
 
-            checks.append("Searched finance records for matching amount/due_date")
-            details["match"] = match
+            # 3) Compare agent claims to ground truth (not the other way around).
+            claim_ok = _amounts_match(claimed_amount, gt_amount) and (
+                claimed_due is None or str(claimed_due) == str(gt_due)
+            )
+            checks.append(
+                "Agent claimed amount/due_date match ground truth"
+                if claim_ok
+                else "Agent claimed amount/due_date diverge from ground truth"
+            )
+            details["claim_vs_ground"] = {
+                "claimed_amount": claimed_amount,
+                "ground_amount": gt_amount,
+                "claimed_due_date": claimed_due,
+                "ground_due_date": gt_due,
+                "claim_ok": claim_ok,
+            }
+
+            passed = match is not None and claim_ok
             return VerificationResult(
-                passed=match is not None,
+                passed=passed,
                 checks=checks,
                 details=details,
                 method="api_requery",
@@ -95,40 +246,73 @@ class Verifier:
 
     async def _verify_payslip(
         self,
-        facts: dict[str, Any],
         task: str,
-        summary: str,
+        memory: Memory,
+        details: dict[str, Any],
+        checks: list[str],
     ) -> VerificationResult:
-        checks: list[str] = []
-        details: dict[str, Any] = {"task": task, "summary": summary, "facts": facts}
-        emp_id = facts.get("employee_id") or 42
+        facts = memory.facts_dict()
+        # Derive employee id from task text when possible.
+        emp_id = _employee_id_from_task(task) or facts.get("employee_id") or 42
         claimed_net = facts.get("net_pay")
 
         async with httpx.AsyncClient(base_url=self.settings.base_url, timeout=15.0) as client:
-            checks.append(f"GET /api/payslips/{emp_id}")
-            resp = await client.get(f"/api/payslips/{emp_id}")
-            body = _safe_json(resp)
-            details["payslip"] = {"status": resp.status_code, "body": body}
-            if resp.status_code != 200:
+            checks.append(f"GET /api/employees/{emp_id} (independent)")
+            emp_resp = await client.get(f"/api/employees/{emp_id}")
+            details["employee"] = {
+                "status": emp_resp.status_code,
+                "body": _safe_json(emp_resp),
+            }
+            if emp_resp.status_code != 200:
                 return VerificationResult(
                     passed=False,
-                    checks=checks + ["Payslip endpoint failed"],
+                    checks=checks + ["Employee lookup failed"],
                     details=details,
                     method="api_requery",
                 )
+
+            checks.append(f"GET /api/payslips/{emp_id} (independent ground truth)")
+            slip_resp = await client.get(f"/api/payslips/{emp_id}")
+            body = _safe_json(slip_resp)
+            details["payslip"] = {"status": slip_resp.status_code, "body": body}
+            if slip_resp.status_code != 200:
+                return VerificationResult(
+                    passed=False,
+                    checks=checks + ["Payslip ground-truth query failed"],
+                    details=details,
+                    method="api_requery",
+                )
+
             actual_net = body.get("net_pay")
-            checks.append("Compared claimed net_pay against API payslip")
-            details["comparison"] = {
+            checks.append(f"Ground-truth net_pay for employee {emp_id} is {actual_net}")
+            claim_ok = claimed_net is not None and _amounts_match(actual_net, claimed_net)
+            checks.append(
+                "Agent claimed net_pay matches ground truth"
+                if claim_ok
+                else "Agent claimed net_pay missing or diverges from ground truth"
+            )
+            details["claim_vs_ground"] = {
                 "claimed_net_pay": claimed_net,
-                "actual_net_pay": actual_net,
+                "ground_net_pay": actual_net,
+                "employee_id": emp_id,
+                "claim_ok": claim_ok,
             }
-            passed = claimed_net is not None and _amounts_match(actual_net, claimed_net)
             return VerificationResult(
-                passed=passed,
+                passed=claim_ok,
                 checks=checks,
                 details=details,
                 method="api_requery",
             )
+
+
+def _employee_id_from_task(task: str) -> int | None:
+    import re
+
+    match = re.search(r"employee\s*(?:id\s*)?(\d+)", task.lower())
+    if match:
+        return int(match.group(1))
+    match = re.search(r"\b(\d+)\b", task)
+    return int(match.group(1)) if match else None
 
 
 def _safe_json(resp: httpx.Response) -> Any:
