@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Invoices — Nexora Corp{% endblock %}
+{% block content %}
+<h1 data-testid="invoice-list-title">Saved Invoices</h1>
+{% if flash %}
+<p class="ok" data-testid="flash">{{ flash }}</p>
+{% endif %}
+{% if invoices %}
+<table class="table" data-testid="invoice-table">
+  <thead>
+    <tr>
+      <th>ID</th>
+      <th>Sender</th>
+      <th>Amount</th>
+      <th>Due</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for inv in invoices %}
+    <tr data-testid="invoice-row-{{ inv.id }}">
+      <td>{{ inv.invoice_id }}</td>
+      <td>{{ inv.sender }}</td>
+      <td>{{ inv.amount }}</td>
+      <td>{{ inv.due_date }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p data-testid="invoice-empty">No invoices yet.</p>
+{% endif %}
+<p><a href="/finance" data-testid="link-finance-form">Enter another invoice</a></p>
+{% endblock %}

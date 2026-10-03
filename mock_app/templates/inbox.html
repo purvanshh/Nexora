@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Inbox — Nexora Corp{% endblock %}
+{% block content %}
+<h1 data-testid="inbox-title">Inbox</h1>
+<p class="muted">Sorted by newest first. Latest invoice = most recent email timestamp.</p>
+<table class="table" data-testid="inbox-table">
+  <thead>
+    <tr>
+      <th>From</th>
+      <th>Subject</th>
+      <th>Received</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for email in emails %}
+    <tr data-testid="mail-row-{{ email.id }}">
+      <td>{{ email.sender }}</td>
+      <td>
+        <a href="/mail/{{ email.id }}" data-testid="mail-link-{{ email.id }}">
+          {{ email.subject }}
+        </a>
+      </td>
+      <td>{{ email.timestamp }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

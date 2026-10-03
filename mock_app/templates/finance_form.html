@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Finance — Nexora Corp{% endblock %}
+{% block content %}
+<h1 data-testid="finance-title">Enter Invoice</h1>
+{% if error %}
+<p class="warn" data-testid="finance-error">{{ error }}</p>
+{% endif %}
+<form method="post" action="/finance/submit" data-testid="finance-form">
+  <label>
+    Sender
+    <input type="text" name="sender" data-testid="input-sender" required />
+  </label>
+  <label>
+    Invoice ID
+    <input type="text" name="invoice_id" data-testid="input-invoice-id" />
+  </label>
+  <label>
+    Amount
+    <input type="number" step="0.01" name="amount" data-testid="input-amount" required />
+  </label>
+  <label>
+    Due date
+    <input type="text" name="due_date" placeholder="YYYY-MM-DD" data-testid="input-due-date" required />
+  </label>
+  <button type="submit" data-testid="submit-invoice">Save invoice</button>
+</form>
+<p><a href="/finance/invoices" data-testid="link-invoice-list">View saved invoices</a></p>
+{% endblock %}

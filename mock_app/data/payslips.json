@@ -1,0 +1,33 @@
+{
+  "42": [
+    {
+      "id": "PS-42-2025-02",
+      "employee_id": 42,
+      "period": "2025-02",
+      "gross_pay": 7200.0,
+      "net_pay": 5340.25,
+      "currency": "USD",
+      "issued_at": "2025-02-28T17:00:00Z"
+    },
+    {
+      "id": "PS-42-2025-03",
+      "employee_id": 42,
+      "period": "2025-03",
+      "gross_pay": 7200.0,
+      "net_pay": 5412.80,
+      "currency": "USD",
+      "issued_at": "2025-03-28T17:00:00Z"
+    }
+  ],
+  "7": [
+    {
+      "id": "PS-7-2025-03",
+      "employee_id": 7,
+      "period": "2025-03",
+      "gross_pay": 6100.0,
+      "net_pay": 4588.10,
+      "currency": "USD",
+      "issued_at": "2025-03-28T17:00:00Z"
+    }
+  ]
+}

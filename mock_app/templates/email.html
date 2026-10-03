@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}{{ email.subject }} — Nexora Corp{% endblock %}
+{% block content %}
+<article class="email" data-testid="email-detail">
+  <a href="/mail" data-testid="back-inbox">← Back to inbox</a>
+  <h1 data-testid="email-subject">{{ email.subject }}</h1>
+  <dl class="meta">
+    <dt>From</dt><dd data-testid="email-sender">{{ email.sender }}</dd>
+    <dt>When</dt><dd data-testid="email-timestamp">{{ email.timestamp }}</dd>
+    {% if email.invoice_id %}
+    <dt>Invoice</dt><dd data-testid="email-invoice-id">{{ email.invoice_id }}</dd>
+    {% endif %}
+    {% if email.amount is defined %}
+    <dt>Amount</dt><dd data-testid="email-amount">{{ email.amount }}</dd>
+    {% endif %}
+    {% if email.due_date %}
+    <dt>Due</dt><dd data-testid="email-due-date">{{ email.due_date }}</dd>
+    {% endif %}
+  </dl>
+  <pre class="body" data-testid="email-body">{{ email.body }}</pre>
+  {% if email.malformed %}
+  <p class="warn" data-testid="email-malformed">⚠ This email is missing structured amount data.</p>
+  {% endif %}
+</article>
+{% endblock %}

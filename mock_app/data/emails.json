@@ -1,0 +1,61 @@
+[
+  {
+    "id": "mail-001",
+    "from": "billing@acme.example",
+    "sender": "Acme Corp",
+    "subject": "Invoice INV-4401 for March services",
+    "timestamp": "2025-03-01T09:15:00Z",
+    "body": "Please find invoice INV-4401.\nAmount: $980.00\nDue date: 2025-03-20\nThank you,\nAcme Billing",
+    "amount": 980.0,
+    "due_date": "2025-03-20",
+    "invoice_id": "INV-4401",
+    "malformed": false
+  },
+  {
+    "id": "mail-002",
+    "from": "ap@globex.example",
+    "sender": "Globex",
+    "subject": "Globex invoice GLO-88",
+    "timestamp": "2025-03-05T14:22:00Z",
+    "body": "Invoice GLO-88\nAmount: $2,400.00\nDue: 2025-03-25",
+    "amount": 2400.0,
+    "due_date": "2025-03-25",
+    "invoice_id": "GLO-88",
+    "malformed": false
+  },
+  {
+    "id": "mail-003",
+    "from": "billing@acme.example",
+    "sender": "Acme Corp",
+    "subject": "Invoice INV-4471 — latest statement",
+    "timestamp": "2025-03-12T11:05:00Z",
+    "body": "Hello,\n\nInvoice INV-4471 from Acme Corp.\nAmount: $1,250.00\nDue date: 2025-03-15\n\nPlease process promptly.\n— Acme Corp Billing",
+    "amount": 1250.0,
+    "due_date": "2025-03-15",
+    "invoice_id": "INV-4471",
+    "malformed": false
+  },
+  {
+    "id": "mail-004",
+    "from": "finance@initech.example",
+    "sender": "Initech",
+    "subject": "Initech INV-12",
+    "timestamp": "2025-03-08T08:00:00Z",
+    "body": "Initech invoice INV-12\nAmount: $450.00\nDue date: 2025-03-30",
+    "amount": 450.0,
+    "due_date": "2025-03-30",
+    "invoice_id": "INV-12",
+    "malformed": false
+  },
+  {
+    "id": "mail-005",
+    "from": "noreply@acme.example",
+    "sender": "Acme Corp",
+    "subject": "Reminder — details attached (incomplete)",
+    "timestamp": "2025-03-10T16:40:00Z",
+    "body": "This email is missing structured invoice fields on purpose.\nPlease contact support for the amount.",
+    "due_date": "2025-03-18",
+    "invoice_id": "INV-BAD",
+    "malformed": true
+  }
+]

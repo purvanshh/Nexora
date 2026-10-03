@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Nexora Corp{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="/" data-testid="brand">Nexora Corp</a>
+    <nav>
+      <a href="/mail" data-testid="nav-mail">Mail</a>
+      <a href="/finance" data-testid="nav-finance">Finance</a>
+      <a href="/finance/invoices" data-testid="nav-invoices">Invoices</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

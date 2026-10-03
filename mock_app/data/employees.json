@@ -1,0 +1,16 @@
+[
+  {
+    "id": 42,
+    "name": "Jordan Lee",
+    "department": "Engineering",
+    "email": "jordan.lee@example.com",
+    "title": "Software Engineer"
+  },
+  {
+    "id": 7,
+    "name": "Sam Rivera",
+    "department": "Finance",
+    "email": "sam.rivera@example.com",
+    "title": "Accountant"
+  }
+]
