@@ -50,19 +50,24 @@ class BrowserTool(Tool):
             return self._page
         from playwright.async_api import async_playwright
 
+        # Always launch a dedicated Chromium — never connect_over_cdp to the mock app.
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=self.headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self.headless,
+            args=["--disable-dev-shm-usage"],
+        )
         self._page = await self._browser.new_page()
         return self._page
 
     async def close(self) -> None:
-        if self._browser is not None:
-            await self._browser.close()
-        if self._playwright is not None:
-            await self._playwright.stop()
+        browser, playwright = self._browser, self._playwright
         self._page = None
         self._browser = None
         self._playwright = None
+        if browser is not None:
+            await browser.close()
+        if playwright is not None:
+            await playwright.stop()
 
     def _abs_url(self, url: str) -> str:
         if url.startswith("http"):

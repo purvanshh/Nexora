@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from agent.config import Settings, get_settings, reset_settings
+from agent.config import get_settings, reset_settings
 from agent.loop import run
 from agent.tracer import Tracer
 
@@ -36,8 +36,8 @@ def main(
     settings = get_settings()
     if not settings.openai_api_key or settings.openai_api_key.startswith("sk-..."):
         console.print(
-            "[red]Missing OPENAI_API_KEY.[/red] Put your key in `.env` at the repo root "
-            "(see `.env.example`), then re-run."
+            "[red]OPENAI_API_KEY missing.[/red] Copy `.env.example` → `.env` and set it "
+            "before booting the agent."
         )
         raise typer.Exit(code=2)
     if no_headless:
@@ -47,20 +47,23 @@ def main(
     settings.agent_max_steps = max_steps
 
     task_text = task or PRIMARY_TASK
-    run_id = None
     tracer: Tracer | None = None
     if trace is not None:
         trace.parent.mkdir(parents=True, exist_ok=True)
-        run_id = trace.stem
-        tracer = Tracer(run_id=run_id, trace_dir=trace.parent)
+        tracer = Tracer(run_id=trace.stem, trace_dir=trace.parent)
 
     async def _go() -> None:
-        result = await run(
-            task_text,
-            max_steps=max_steps,
-            settings=settings,
-            tracer=tracer,
-        )
+        try:
+            result = await run(
+                task_text,
+                max_steps=max_steps,
+                settings=settings,
+                tracer=tracer,
+            )
+        except RuntimeError as exc:
+            console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=2) from exc
+
         elapsed = (result.ended_at - result.started_at).total_seconds()
         icon = {"success": "✓", "partial": "⚠", "failed": "✗"}[result.status]
         console.print(

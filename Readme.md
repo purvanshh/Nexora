@@ -14,9 +14,10 @@ make demo              # boots mock app + runs primary scenario
 Secondary scenario (same agent loop, different prompt):
 
 ```bash
-make secondary
-# or: uv run python cli.py "Look up employee 42, get their latest payslip, and tell me their net pay."
+make secondary   # boots mock app + payslip task (same agent loop)
 ```
+
+> Do not run `uv run python cli.py ...` alone unless `make mock` is already up — the agent health-checks the mock app at startup.
 
 Chaos / retry demo:
 
@@ -71,7 +72,13 @@ See `agent/loop.py` for the full implementation.
 
 ## Verification design
 
-Actions can lie. After the run, `Verifier` re-queries finance (`GET /api/invoices…`) or HR (`GET /api/payslips/{id}`) and compares fields to scratchpad facts. The result is separate from step outcomes in `RunResult`.
+Actions can lie, and agents can overstep. The verifier:
+
+1. **Re-derives** the correct outcome from the source of truth (mail / payslip APIs) — it does not trust the agent's summary.
+2. **Confirms system state** (finance record exists, net pay matches).
+3. **Rejects scope violations** — any POST/write not justified by the task fails verification (`no_out_of_scope_writes`).
+
+Read-only tasks (e.g. payslip lookup) must never create invoices.
 
 ## Design decisions
 

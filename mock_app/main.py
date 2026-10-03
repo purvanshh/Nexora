@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.staticfiles import StaticFiles
 
 from mock_app.routers import finance, hr, mail
@@ -25,11 +25,32 @@ app.include_router(hr.router)
 async def root() -> dict[str, str]:
     return {
         "service": "nexora-mock-app",
+        "health": "/health",
         "mail": "/mail",
         "finance": "/finance",
         "api_mail": "/api/mail",
         "api_invoices": "/api/invoices",
     }
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
+@app.get("/favicon.ico")
+async def favicon() -> Response:
+    """Silence browser favicon noise in access logs."""
+    return Response(status_code=204)
+
+
+@app.get("/json/version")
+async def not_cdp() -> dict[str, str]:
+    """
+    IDE/devtools sometimes probe localhost ports for Chrome CDP.
+    This is NOT a browser debug endpoint — Playwright launches its own Chromium.
+    """
+    return {"error": "not_a_cdp_endpoint", "hint": "use Playwright chromium.launch()"}
 
 
 @app.post("/api/reset")

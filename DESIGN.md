@@ -24,9 +24,15 @@ LangChain/CrewAI hide the loop behind abstractions. This prototype's value is sh
 
 | Class | Response |
 |---|---|
-| Transient (timeout, 500) | Retry same tool up to N=2 with backoff |
+| Transient (timeout, 500) | Retry same tool up to N=2 with backoff (`CHAOS=1` proves this) |
+| No progress (≥3 idle steps) | Constrained `ask_user` menu: retry / skip / abort / inform |
 | Ambiguity (multiple matches) | `ask_user` |
+| Scope violation (extra writes) | Verifier fails with `scope_violation` — run is not success |
 | Impossible / exhausted | Report `partial` or `failed` with evidence |
+
+## Scope as a product constraint
+
+An autonomous worker that completes the asked question *and* mutates unrelated systems is a liability. Verification therefore inspects the mutation log from the run trace, not only the final claimed fact.
 
 ## Cost / latency budget
 
