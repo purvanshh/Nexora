@@ -28,6 +28,30 @@ async def test_api_404_observation(mock_app: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_api_422_includes_validation_detail(mock_app: str) -> None:
+    """Missing required fields must surface FastAPI detail to the planner."""
+    tool = APITool(mock_app)
+    obs = await tool.run(
+        APIArgs(
+            method="POST",
+            path="/api/invoices",
+            json={
+                "invoice_id": "INV-4471",
+                "amount": 1250,
+                "due_date": "2025-03-15",
+                # sender intentionally omitted
+            },
+        )
+    )
+    assert not obs.ok
+    assert obs.data is not None
+    assert obs.data["status_code"] == 422
+    assert obs.data.get("retryable") is False
+    assert obs.error is not None
+    assert "sender" in obs.error.lower() or "sender" in str(obs.data.get("body")).lower()
+
+
+@pytest.mark.asyncio
 async def test_api_reject_non_positive_amount(mock_app: str) -> None:
     tool = APITool(mock_app)
     obs = await tool.run(

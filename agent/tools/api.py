@@ -54,6 +54,14 @@ class APITool(Tool):
                 body = {"text": resp.text}
 
             ok = 200 <= resp.status_code < 300
+            error: str | None = None
+            if not ok:
+                # Surface validation detail so the planner can fix 4xx payloads
+                # instead of blindly retrying the same body.
+                detail = body.get("detail") if isinstance(body, dict) else body
+                error = f"HTTP {resp.status_code}"
+                if detail is not None:
+                    error = f"{error}: {detail}"
             return Observation(
                 ok=ok,
                 data={
@@ -61,8 +69,9 @@ class APITool(Tool):
                     "body": body,
                     "url": url,
                     "method": args.method,
+                    "retryable": 500 <= resp.status_code < 600,
                 },
-                error=None if ok else f"HTTP {resp.status_code}",
+                error=error,
                 duration_ms=int((time.perf_counter() - started) * 1000),
                 evidence=[url],
             )

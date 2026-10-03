@@ -19,6 +19,28 @@ from agent.tracer import Tracer
 from agent.verifier import Verifier
 
 
+def is_retryable(obs: Observation) -> bool:
+    """Retry only transient failures (5xx / connection). Never retry 4xx validation."""
+    if obs.ok:
+        return False
+    status = None
+    if obs.data and isinstance(obs.data.get("status_code"), int):
+        status = int(obs.data["status_code"])
+    if status is not None:
+        return 500 <= status < 600
+    err = (obs.error or "").lower()
+    # Connection / timeout style errors from httpx (no status_code on Observation).
+    transient_markers = (
+        "timeout",
+        "timed out",
+        "connecterror",
+        "connection",
+        "all connection attempts failed",
+        "temporarily unavailable",
+    )
+    return any(marker in err for marker in transient_markers)
+
+
 async def execute_with_retry(
     registry: ToolRegistry,
     tool_call: ToolCall,
@@ -27,7 +49,7 @@ async def execute_with_retry(
     tracer: Tracer | None = None,
     step_idx: int = 0,
 ) -> Observation:
-    """Run a tool with up to `retries` identical retries on failure."""
+    """Retry identical calls only for transient errors; return 4xx immediately."""
     last: Observation | None = None
     attempts = retries + 1
     for attempt in range(attempts):
@@ -37,6 +59,8 @@ async def execute_with_retry(
         last = obs
         if tracer is not None:
             tracer.log_error(step_idx, obs.error or "unknown", retry=attempt)
+        if not is_retryable(obs):
+            return obs
         if attempt < attempts - 1:
             await asyncio.sleep(0.5)
     assert last is not None
@@ -279,6 +303,8 @@ async def run(
         for step in memory.steps:
             if step.observation:
                 evidence.extend(step.observation.evidence)
+        # Preserve order, drop duplicates for the user-facing report.
+        evidence = list(dict.fromkeys(evidence))
 
         if aborted:
             status = "failed"
