@@ -34,16 +34,18 @@ def build_summary(
     )
 
     if kind == "invoice":
-        invoice_id = facts.get("invoice_id") or facts.get("finance_invoice_id") or "unknown"
+        # Always source the business invoice_id from scratchpad facts (email extract).
+        # Never invent or use finance-generated IDs here.
+        invoice_id = facts.get("invoice_id") or "NOT EXTRACTED"
         amount = facts.get("invoice_amount")
-        due = facts.get("invoice_due_date") or "unknown"
+        due = facts.get("invoice_due_date") or "NOT EXTRACTED"
         sender = facts.get("sender") or facts.get("invoice_sender") or "Acme Corp"
         if amount is None and not facts:
             return fallback or "Invoice task did not produce usable facts."
         return (
             f"Submitted the latest invoice from {sender} to the finance system.\n"
             f"  Invoice: {invoice_id}\n"
-            f"  Amount:  {_money(amount)}\n"
+            f"  Amount:  {_money(amount) if amount is not None else 'NOT EXTRACTED'}\n"
             f"  Due:     {due}\n"
             f"{verify_line.replace('the source of truth', '/api/invoices')}"
         )

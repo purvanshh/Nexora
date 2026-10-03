@@ -185,33 +185,47 @@ class Verifier:
 
             gt_amount = ground.get("amount")
             gt_due = ground.get("due_date")
+            gt_invoice_id = ground.get("invoice_id")
+            claimed_invoice_id = facts.get("invoice_id")
             checks.append(
-                f"Derived latest Acme invoice {ground.get('invoice_id')} "
+                f"Derived latest Acme invoice {gt_invoice_id} "
                 f"amount={gt_amount} due={gt_due}"
             )
 
-            # 2) Confirm finance state matches ground truth.
-            checks.append("GET /api/invoices?sender=Acme")
-            inv_resp = await client.get("/api/invoices", params={"sender": "Acme"})
-            details["finance_list"] = {
-                "status": inv_resp.status_code,
-                "body": _safe_json(inv_resp),
-            }
-            if inv_resp.status_code != 200:
-                return VerificationResult(
-                    passed=False,
-                    checks=checks + ["Finance list query failed"],
-                    details=details,
-                    method="api_requery",
-                )
-            invoices = inv_resp.json()
+            # 2) Confirm finance state matches ground truth (prefer lookup by source ID).
             match = None
-            for inv in invoices:
-                if _amounts_match(inv.get("amount"), gt_amount) and str(
-                    inv.get("due_date")
-                ) == str(gt_due):
-                    match = inv
-                    break
+            if gt_invoice_id:
+                checks.append(f"GET /api/invoices/{gt_invoice_id}")
+                by_id = await client.get(f"/api/invoices/{gt_invoice_id}")
+                details["finance_by_id"] = {
+                    "status": by_id.status_code,
+                    "body": _safe_json(by_id),
+                }
+                if by_id.status_code == 200:
+                    match = by_id.json()
+
+            if match is None:
+                checks.append("GET /api/invoices?sender=Acme")
+                inv_resp = await client.get("/api/invoices", params={"sender": "Acme"})
+                details["finance_list"] = {
+                    "status": inv_resp.status_code,
+                    "body": _safe_json(inv_resp),
+                }
+                if inv_resp.status_code != 200:
+                    return VerificationResult(
+                        passed=False,
+                        checks=checks + ["Finance list query failed"],
+                        details=details,
+                        method="api_requery",
+                    )
+                invoices = inv_resp.json()
+                for inv in invoices:
+                    if _amounts_match(inv.get("amount"), gt_amount) and str(
+                        inv.get("due_date")
+                    ) == str(gt_due):
+                        match = inv
+                        break
+
             details["finance_match"] = match
             checks.append(
                 "Finance record matches independently derived amount/due_date"
@@ -219,7 +233,29 @@ class Verifier:
                 else "No finance record matching ground-truth amount/due_date"
             )
 
-            # 3) Compare agent claims to ground truth (not the other way around).
+            # 3) invoice_id must match the source email (load-bearing check).
+            id_ok = False
+            if match is None or not gt_invoice_id:
+                checks.append("invoice_id check skipped — missing finance record or ground truth")
+            elif str(match.get("invoice_id")) != str(gt_invoice_id):
+                checks.append(
+                    f"invoice_id mismatch: finance has {match.get('invoice_id')}, "
+                    f"source says {gt_invoice_id}"
+                )
+            else:
+                id_ok = True
+                checks.append("invoice_id matches source")
+
+            claim_id_ok = claimed_invoice_id is not None and str(claimed_invoice_id) == str(
+                gt_invoice_id
+            )
+            checks.append(
+                "Agent claimed invoice_id matches source"
+                if claim_id_ok
+                else "Agent claimed invoice_id missing or diverges from source"
+            )
+
+            # 4) Compare agent amount/due claims to ground truth.
             claim_ok = _amounts_match(claimed_amount, gt_amount) and (
                 claimed_due is None or str(claimed_due) == str(gt_due)
             )
@@ -233,10 +269,15 @@ class Verifier:
                 "ground_amount": gt_amount,
                 "claimed_due_date": claimed_due,
                 "ground_due_date": gt_due,
+                "claimed_invoice_id": claimed_invoice_id,
+                "ground_invoice_id": gt_invoice_id,
+                "finance_invoice_id": match.get("invoice_id") if match else None,
                 "claim_ok": claim_ok,
+                "id_ok": id_ok,
+                "claim_id_ok": claim_id_ok,
             }
 
-            passed = match is not None and claim_ok
+            passed = match is not None and claim_ok and id_ok and claim_id_ok
             return VerificationResult(
                 passed=passed,
                 checks=checks,

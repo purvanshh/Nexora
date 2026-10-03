@@ -70,6 +70,41 @@ async def get_invoice(invoice_id: str) -> dict[str, Any]:
     raise HTTPException(status_code=404, detail="Invoice not found")
 
 
+def _find_by_invoice_id(invoices: list[dict[str, Any]], invoice_id: str) -> dict[str, Any] | None:
+    for inv in invoices:
+        if inv.get("invoice_id") == invoice_id or inv.get("id") == invoice_id:
+            return inv
+    return None
+
+
+def _build_invoice_record(
+    payload: InvoiceCreate,
+    *,
+    notes: str | None = None,
+) -> dict[str, Any]:
+    """Honor client-supplied invoice_id; only mint an ID when none was provided."""
+    invoices = read_json("invoices.json")
+    if payload.invoice_id:
+        if _find_by_invoice_id(invoices, payload.invoice_id) is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invoice ID already exists: {payload.invoice_id}",
+            )
+        business_id = payload.invoice_id
+    else:
+        business_id = f"INV-{uuid.uuid4().hex[:4].upper()}"
+
+    return {
+        "id": f"fin-{uuid.uuid4().hex[:8]}",
+        "invoice_id": business_id,
+        "sender": payload.sender,
+        "amount": payload.amount,
+        "due_date": payload.due_date,
+        "source_mail_id": payload.source_mail_id,
+        "notes": notes if notes is not None else payload.notes,
+    }
+
+
 @router.post("/api/invoices")
 async def create_invoice(payload: InvoiceCreate) -> JSONResponse:
     """Create an invoice. When CHAOS=1, the first POST returns 500 (read per-request)."""
@@ -90,16 +125,8 @@ async def create_invoice(payload: InvoiceCreate) -> JSONResponse:
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be greater than 0")
 
+    record = _build_invoice_record(payload)
     invoices = read_json("invoices.json")
-    record = {
-        "id": f"fin-{uuid.uuid4().hex[:8]}",
-        "invoice_id": payload.invoice_id or f"INV-{uuid.uuid4().hex[:4].upper()}",
-        "sender": payload.sender,
-        "amount": payload.amount,
-        "due_date": payload.due_date,
-        "source_mail_id": payload.source_mail_id,
-        "notes": payload.notes,
-    }
     invoices.append(record)
     write_json("invoices.json", invoices)
     return JSONResponse(status_code=201, content=record)
@@ -134,17 +161,19 @@ async def submit_form(request: Request) -> HTMLResponse:
         due_date=due_date,
         invoice_id=invoice_id,
     )
-    # Reuse API logic without chaos for form path? Keep chaos for API only.
+    try:
+        record = _build_invoice_record(create, notes="submitted-via-form")
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request,
+            "finance_form.html",
+            {
+                "invoices": read_json("invoices.json"),
+                "error": str(exc.detail),
+            },
+            status_code=exc.status_code,
+        )
     invoices = read_json("invoices.json")
-    record = {
-        "id": f"fin-{uuid.uuid4().hex[:8]}",
-        "invoice_id": create.invoice_id or f"INV-{uuid.uuid4().hex[:4].upper()}",
-        "sender": create.sender,
-        "amount": create.amount,
-        "due_date": create.due_date,
-        "source_mail_id": None,
-        "notes": "submitted-via-form",
-    }
     invoices.append(record)
     write_json("invoices.json", invoices)
     return templates.TemplateResponse(

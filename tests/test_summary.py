@@ -23,6 +23,22 @@ def test_invoice_summary_template() -> None:
     assert "2025-03-15" in text
     assert "Verified" in text
     assert "{" not in text
+    assert "unknown" not in text.lower()
+
+
+def test_invoice_summary_missing_id_is_explicit() -> None:
+    mem = Memory(task="enter Acme invoice into finance")
+    mem.remember("invoice_amount", 1250.0, 0)
+    mem.remember("invoice_due_date", "2025-03-15", 0)
+    # Deliberately do not remember invoice_id; do not use finance_invoice_id.
+    mem.remember("finance_invoice_id", "INV-B28C", 0)
+    text = build_summary(
+        mem.task,
+        mem,
+        VerificationResult(passed=False, checks=[], method="api_requery"),
+    )
+    assert "NOT EXTRACTED" in text
+    assert "INV-B28C" not in text
 
 
 def test_payslip_summary_template() -> None:

@@ -119,7 +119,13 @@ async def test_e2e_primary_stubbed_llm(
     assert result.status == "success"
     assert result.verification is not None
     assert result.verification.passed is True
+    assert "invoice_id matches source" in result.verification.checks
+    assert "INV-4471" in result.summary
+    assert "unknown" not in result.summary.lower()
 
     async with httpx.AsyncClient(base_url=mock_app) as client:
+        record = (await client.get("/api/invoices/INV-4471")).json()
+        assert record["invoice_id"] == "INV-4471"
+        assert abs(float(record["amount"]) - 1250.0) < 0.01
         listed = (await client.get("/api/invoices", params={"sender": "Acme"})).json()
-    assert any(abs(float(i["amount"]) - 1250.0) < 0.01 for i in listed)
+    assert any(i.get("invoice_id") == "INV-4471" for i in listed)

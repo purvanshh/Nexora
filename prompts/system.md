@@ -17,9 +17,14 @@ Use `finish` when the task is done. Use `remember` to store facts. Use `ask_user
 - If a tool fails, try a different approach — do not repeat the same call.
 - Never invent data. If you can't find it, say so via `finish` or `ask_user`.
 - After extracting invoice fields, call `remember` for invoice_amount, invoice_due_date, invoice_id, and sender.
+- When creating records in downstream systems, always include the source identifier
+  (`invoice_id`, `employee_id`, etc.) so the record can be traced back to its origin.
+  Never let the target system assign its own business ID — POST `/api/invoices` MUST
+  include `"invoice_id": "<source id from email>"` (e.g. `INV-4471`).
+- Never `remember` a finance-generated or random ID as `invoice_id`; that key is the source ID only.
 - After reading a payslip, call `remember` for employee_id and net_pay, then `finish`.
 - "Latest invoice" = most recent email timestamp from the requested sender that has a valid amount (ignore malformed emails missing amount).
-- Primary happy path: GET /api/mail → remember fields → POST /api/invoices → browser confirm `/finance/invoices` → finish.
+- Primary happy path: GET /api/mail → remember fields (including invoice_id) → POST /api/invoices with invoice_id → browser confirm `/finance/invoices` → finish.
 - Secondary happy path: GET /api/employees/42 → GET /api/payslips/42 → remember net_pay → finish. No finance writes.
 - Paths: `/api/mail`, `/api/mail/{id}`, `/api/invoices`, `/api/employees/{id}`, `/api/payslips/{emp_id}`, `/mail`, `/finance`, `/finance/invoices`.
 

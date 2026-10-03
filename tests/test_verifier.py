@@ -75,10 +75,60 @@ async def test_verifier_passes_when_record_exists(mock_app: str, workspace, tmp_
     )
     mem.remember("invoice_amount", 1250.0, 1)
     mem.remember("invoice_due_date", "2025-03-15", 1)
+    mem.remember("invoice_id", "INV-4471", 1)
     mem.remember("sender", "Acme Corp", 1)
     result = await Verifier(settings).verify(mem.task, mem, summary="submitted")
     assert result.passed is True
     assert "no_out_of_scope_writes: passed" in result.checks
+    assert "invoice_id matches source" in result.checks
+
+
+@pytest.mark.asyncio
+async def test_verifier_rejects_invoice_id_mismatch(
+    mock_app: str, workspace, tmp_path
+) -> None:
+    """Finance minting a different business ID must fail verification."""
+    async with httpx.AsyncClient(base_url=mock_app) as client:
+        # Intentionally omit invoice_id so finance mints a fallback ID
+        resp = await client.post(
+            "/api/invoices",
+            json={
+                "sender": "Acme Corp",
+                "amount": 1250.0,
+                "due_date": "2025-03-15",
+            },
+        )
+        assert resp.status_code == 201
+        minted = resp.json()["invoice_id"]
+        assert minted != "INV-4471"
+
+    settings = Settings(
+        mock_app_url=mock_app,
+        workspace_dir=workspace,
+        trace_dir=tmp_path / "traces",
+    )
+    mem = Memory(
+        task=(
+            "Find the latest invoice from Acme Corp, extract amount and due date, "
+            "enter it into the finance system."
+        )
+    )
+    mem.add_step(
+        0,
+        "submit without source id",
+        ToolCall(
+            tool="api",
+            args={"method": "POST", "path": "/api/invoices", "json": {}},
+        ),
+        Observation(ok=True, data={"status_code": 201}),
+    )
+    mem.remember("invoice_amount", 1250.0, 1)
+    mem.remember("invoice_due_date", "2025-03-15", 1)
+    mem.remember("invoice_id", "INV-4471", 1)
+    mem.remember("sender", "Acme Corp", 1)
+    result = await Verifier(settings).verify(mem.task, mem, summary="submitted")
+    assert result.passed is False
+    assert any("invoice_id mismatch" in c for c in result.checks)
 
 
 @pytest.mark.asyncio

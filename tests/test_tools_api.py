@@ -69,6 +69,42 @@ async def test_api_create_invoice_201(mock_app: str) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_invoice_honors_client_invoice_id(mock_app: str) -> None:
+    tool = APITool(mock_app)
+    obs = await tool.run(
+        APIArgs(
+            method="POST",
+            path="/api/invoices",
+            json={
+                "sender": "Acme Corp",
+                "amount": 1250.0,
+                "due_date": "2025-03-15",
+                "invoice_id": "INV-4471",
+            },
+        )
+    )
+    assert obs.ok
+    assert obs.data is not None
+    assert obs.data["body"]["invoice_id"] == "INV-4471"
+
+    dup = await tool.run(
+        APIArgs(
+            method="POST",
+            path="/api/invoices",
+            json={
+                "sender": "Acme Corp",
+                "amount": 1250.0,
+                "due_date": "2025-03-15",
+                "invoice_id": "INV-4471",
+            },
+        )
+    )
+    assert not dup.ok
+    assert dup.data is not None
+    assert dup.data["status_code"] == 409
+
+
+@pytest.mark.asyncio
 async def test_chaos_first_post_500_then_201(mock_app: str, monkeypatch) -> None:
     """CHAOS=1 must inject a 500 on the first invoice POST, then allow retry."""
     import os
