@@ -125,5 +125,13 @@ class Memory:
                 and s.observation.ok
                 for s in self.steps
             )
-            return has_fields and wrote
+            # Require a real Playwright UI check so the browser tool stays on the path.
+            browsed = any(
+                s.tool_call
+                and s.tool_call.tool == "browser"
+                and s.observation
+                and s.observation.ok
+                for s in self.steps
+            )
+            return has_fields and wrote and browsed
         return False

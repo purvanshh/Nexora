@@ -44,15 +44,6 @@ async def favicon() -> Response:
     return Response(status_code=204)
 
 
-@app.get("/json/version")
-async def not_cdp() -> dict[str, str]:
-    """
-    IDE/devtools sometimes probe localhost ports for Chrome CDP.
-    This is NOT a browser debug endpoint — Playwright launches its own Chromium.
-    """
-    return {"error": "not_a_cdp_endpoint", "hint": "use Playwright chromium.launch()"}
-
-
 @app.post("/api/reset")
 async def api_reset() -> dict[str, str]:
     reset_data()

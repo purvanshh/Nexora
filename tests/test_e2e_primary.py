@@ -74,6 +74,13 @@ def _script() -> list[LLMResponse]:
             ),
         ),
         LLMResponse(
+            thought="Confirm via Playwright UI",
+            tool_call=ToolCall(
+                tool="browser",
+                args={"action": "goto", "url": "/finance/invoices"},
+            ),
+        ),
+        LLMResponse(
             thought="Task complete",
             is_finish=True,
             summary=(

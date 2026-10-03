@@ -12,6 +12,7 @@ from agent.health import check_mock_app
 from agent.memory import Memory
 from agent.models import LLMResponse, Observation, RunResult, ToolCall
 from agent.planner import LLMClient, OpenAILLMClient, build_prompt
+from agent.summary import build_summary
 from agent.tools.ask_user import MENU_OPTIONS
 from agent.tools.registry import ToolRegistry, get_default_registry
 from agent.tracer import Tracer
@@ -119,9 +120,7 @@ async def run(
             if memory.required_facts_present() and step_idx > 0:
                 soft = await Verifier(settings).verify(task, memory, summary="soft-check")
                 if soft.passed:
-                    final_summary = (
-                        f"Completed with available facts: {memory.facts_dict()}"
-                    )
+                    final_summary = build_summary(task, memory, soft)
                     memory.add_step(
                         step_idx,
                         "Soft finish: verifier would pass on current state",
@@ -269,6 +268,12 @@ async def run(
             verification.checks,
             verification.details,
         )
+
+        # Always prefer a deterministic business summary over raw fact dumps / LLM prose.
+        if not aborted:
+            final_summary = build_summary(
+                task, memory, verification, fallback=final_summary
+            )
 
         evidence: list[str] = []
         for step in memory.steps:

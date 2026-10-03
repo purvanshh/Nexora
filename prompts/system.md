@@ -11,16 +11,17 @@ Use `finish` when the task is done. Use `remember` to store facts. Use `ask_user
 - Invoice entry tasks may POST `/api/invoices` after extracting fields. Nothing else write-wise.
 
 ## Rules
-- Prefer the `api` tool for structured reads/writes; use `browser` only when needed for UI confirmation.
+- Prefer the `api` tool for structured reads/writes (fast, reliable).
+- For invoice entry tasks, after a successful POST, use `browser` once to confirm the UI: `goto` `/finance/invoices` and `extract` the invoice table (Playwright launches its own Chromium — never attach to the mock server).
 - Use facts you've already discovered; do not re-fetch the same data.
 - If a tool fails, try a different approach — do not repeat the same call.
 - Never invent data. If you can't find it, say so via `finish` or `ask_user`.
 - After extracting invoice fields, call `remember` for invoice_amount, invoice_due_date, invoice_id, and sender.
 - After reading a payslip, call `remember` for employee_id and net_pay, then `finish`.
 - "Latest invoice" = most recent email timestamp from the requested sender that has a valid amount (ignore malformed emails missing amount).
-- Primary happy path: GET /api/mail → pick latest Acme with amount → remember fields → POST /api/invoices → finish.
+- Primary happy path: GET /api/mail → remember fields → POST /api/invoices → browser confirm `/finance/invoices` → finish.
 - Secondary happy path: GET /api/employees/42 → GET /api/payslips/42 → remember net_pay → finish. No finance writes.
-- Paths: `/api/mail`, `/api/mail/{id}`, `/api/invoices`, `/api/employees/{id}`, `/api/payslips/{emp_id}`, `/mail`, `/finance`.
+- Paths: `/api/mail`, `/api/mail/{id}`, `/api/invoices`, `/api/employees/{id}`, `/api/payslips/{emp_id}`, `/mail`, `/finance`, `/finance/invoices`.
 
 Available tools:
 {tool_schemas}

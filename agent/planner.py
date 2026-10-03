@@ -107,7 +107,7 @@ class OpenAILLMClient:
         kwargs: dict[str, Any] = {
             "model": self.settings.agent_model,
             "messages": [{"role": "system", "content": system}, *messages],
-            "temperature": 0.2,
+            "temperature": 0,
         }
         if tools:
             kwargs["tools"] = tools
