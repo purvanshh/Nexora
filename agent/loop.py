@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -13,10 +14,12 @@ from agent.memory import Memory
 from agent.models import LLMResponse, Observation, RunResult, ToolCall, VerificationResult
 from agent.planner import LLMClient, OpenAILLMClient, build_prompt
 from agent.summary import build_summary
-from agent.tools.ask_user import MENU_OPTIONS
+from agent.tools.ask_user import APPROVAL_OPTIONS, MENU_OPTIONS
 from agent.tools.registry import ToolRegistry, get_default_registry
 from agent.tracer import Tracer
 from agent.verifier import Verifier
+
+_WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def is_retryable(obs: Observation) -> bool:
@@ -48,6 +51,121 @@ def _with_retry_meta(obs: Observation, *, attempts: int, exhausted: bool) -> Obs
     return obs.model_copy(update={"data": data})
 
 
+def _is_mutating_api(tool_call: ToolCall) -> bool:
+    if tool_call.tool != "api":
+        return False
+    method = str(tool_call.args.get("method", "GET")).upper()
+    return method in _WRITE_METHODS
+
+
+def _json_body(tool_call: ToolCall) -> dict[str, Any]:
+    body = tool_call.args.get("json")
+    if body is None:
+        body = tool_call.args.get("json_body")
+    return dict(body) if isinstance(body, dict) else {}
+
+
+def _approval_signature(tool_call: ToolCall) -> str:
+    return json.dumps(
+        {
+            "tool": tool_call.tool,
+            "method": str(tool_call.args.get("method", "")).upper(),
+            "path": tool_call.args.get("path"),
+            "json": _json_body(tool_call),
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+def _payload_matches_record(payload: dict[str, Any], record: dict[str, Any]) -> bool:
+    """True when an existing finance/leave record matches the write we intended."""
+    if not payload or not record:
+        return False
+    if "invoice_id" in payload:
+        if str(record.get("invoice_id") or record.get("id")) != str(payload["invoice_id"]):
+            return False
+        if "amount" in payload and not _approx_equal(record.get("amount"), payload["amount"]):
+            return False
+        if "due_date" in payload and str(record.get("due_date")) != str(payload["due_date"]):
+            return False
+        if "sender" in payload and str(record.get("sender", "")).lower() != str(
+            payload["sender"]
+        ).lower():
+            return False
+        return True
+    # Leave-style payloads
+    for key in ("employee_id", "start_date", "end_date", "reason"):
+        if key in payload and str(record.get(key)) != str(payload[key]):
+            return False
+    return bool(payload)
+
+
+def _approx_equal(a: Any, b: Any) -> bool:
+    try:
+        return abs(float(a) - float(b)) < 0.005
+    except (TypeError, ValueError):
+        return str(a) == str(b)
+
+
+async def _try_idempotent_recover(
+    registry: ToolRegistry,
+    tool_call: ToolCall,
+    obs: Observation,
+) -> Observation | None:
+    """If a write may have committed despite a failed response, recover via GET.
+
+    Retries of POST are not safe by default. Client-supplied invoice_id turns a
+    duplicate into HTTP 409; we treat a matching existing record as success.
+    """
+    if tool_call.tool != "api":
+        return None
+    method = str(tool_call.args.get("method", "")).upper()
+    if method != "POST":
+        return None
+    payload = _json_body(tool_call)
+    invoice_id = payload.get("invoice_id")
+    if not invoice_id:
+        return None
+
+    status = None
+    if obs.data and isinstance(obs.data.get("status_code"), int):
+        status = int(obs.data["status_code"])
+    # Recover on conflict, or before/after retrying a transient failure.
+    if status is None:
+        return None
+    if not (status == 409 or 500 <= status < 600):
+        return None
+
+    get_call = ToolCall(
+        tool="api",
+        args={"method": "GET", "path": f"/api/invoices/{invoice_id}"},
+        reasoning="idempotent_recover",
+    )
+    check = await registry.execute(get_call.tool, get_call.args)
+    if not check.ok or not check.data:
+        return None
+    record = check.data.get("body")
+    if not isinstance(record, dict):
+        return None
+    if not _payload_matches_record(payload, record):
+        return None
+    return Observation(
+        ok=True,
+        data={
+            "status_code": 200,
+            "body": record,
+            "url": check.data.get("url"),
+            "method": "GET",
+            "idempotent_recover": True,
+            "original_error": obs.error,
+            "original_status": status,
+        },
+        evidence=list(check.evidence or []),
+        duration_ms=check.duration_ms,
+    )
+
+
 async def execute_with_retry(
     registry: ToolRegistry,
     tool_call: ToolCall,
@@ -56,13 +174,21 @@ async def execute_with_retry(
     tracer: Tracer | None = None,
     step_idx: int = 0,
 ) -> Observation:
-    """Retry identical calls only for transient errors; return 4xx immediately."""
+    """Retry identical calls only for transient errors; return 4xx immediately.
+
+    On POST conflicts / possible committed-but-500 writes, attempt idempotent recover.
+    """
     last: Observation | None = None
     attempts = retries + 1
     for attempt in range(attempts):
         obs = await registry.execute(tool_call.tool, tool_call.args)
         if obs.ok:
             return _with_retry_meta(obs, attempts=attempt + 1, exhausted=False)
+
+        recovered = await _try_idempotent_recover(registry, tool_call, obs)
+        if recovered is not None:
+            return _with_retry_meta(recovered, attempts=attempt + 1, exhausted=False)
+
         last = obs
         if tracer is not None:
             tracer.log_error(step_idx, obs.error or "unknown", retry=attempt)
@@ -71,6 +197,10 @@ async def execute_with_retry(
         if attempt < attempts - 1:
             await asyncio.sleep(0.5)
     assert last is not None
+    # Final recover pass after exhausting retries (write may have landed on last try).
+    recovered = await _try_idempotent_recover(registry, tool_call, last)
+    if recovered is not None:
+        return _with_retry_meta(recovered, attempts=attempts, exhausted=False)
     return _with_retry_meta(last, attempts=attempts, exhausted=True)
 
 
@@ -87,6 +217,45 @@ def _abort_summary(memory: Memory) -> str:
     )
 
 
+async def _ask_menu(
+    *,
+    registry: ToolRegistry,
+    memory: Memory,
+    tracer: Tracer,
+    step_idx: int,
+    reason: str,
+    options: list[str],
+    reasoning: str,
+) -> str | None:
+    """Ask the user via constrained menu. Returns normalized action or None."""
+    call = ToolCall(
+        tool="ask_user",
+        args={
+            "question": reason,
+            "options": list(options),
+        },
+        reasoning=reasoning,
+    )
+    obs = await execute_with_retry(
+        registry,
+        call,
+        retries=0,
+        tracer=tracer,
+        step_idx=step_idx,
+    )
+    memory.add_step(step_idx, reasoning, call, obs)
+    tracer.log_observation(step_idx, obs)
+    if obs.data:
+        tracer.log_user_answer(
+            step_idx,
+            str(obs.data.get("question", "")),
+            str(obs.data.get("answer", "")),
+            obs.data.get("normalized"),
+        )
+        return obs.data.get("normalized")
+    return None
+
+
 async def _escalate(
     *,
     registry: ToolRegistry,
@@ -95,36 +264,53 @@ async def _escalate(
     step_idx: int,
     reason: str,
 ) -> str | None:
-    """Ask the user via constrained menu. Returns normalized action or None."""
-    escalate_call = ToolCall(
-        tool="ask_user",
-        args={
-            "question": (
-                f"{reason} Here's what I have: {memory.facts_dict()}. "
-                f"Last error: {memory.last_error}."
-            ),
-            "options": list(MENU_OPTIONS),
-        },
-        reasoning="escalation",
-    )
-    esc_obs = await execute_with_retry(
-        registry,
-        escalate_call,
-        retries=0,
+    return await _ask_menu(
+        registry=registry,
+        memory=memory,
         tracer=tracer,
         step_idx=step_idx,
+        reason=(
+            f"{reason} Here's what I have: {memory.facts_dict()}. "
+            f"Last error: {memory.last_error}."
+        ),
+        options=list(MENU_OPTIONS),
+        reasoning="escalation",
     )
-    memory.add_step(step_idx, "Escalating to user", escalate_call, esc_obs)
-    tracer.log_observation(step_idx, esc_obs)
-    if esc_obs.data:
-        tracer.log_user_answer(
-            step_idx,
-            str(esc_obs.data.get("question", "")),
-            str(esc_obs.data.get("answer", "")),
-            esc_obs.data.get("normalized"),
-        )
-        return esc_obs.data.get("normalized")
-    return None
+
+
+async def _request_write_approval(
+    *,
+    registry: ToolRegistry,
+    memory: Memory,
+    tracer: Tracer,
+    step_idx: int,
+    tool_call: ToolCall,
+    approved_sigs: set[str],
+) -> str | None:
+    """Pause before a mutating API call; remember approval for identical retries."""
+    sig = _approval_signature(tool_call)
+    if sig in approved_sigs:
+        return "approve"
+    method = str(tool_call.args.get("method", "")).upper()
+    path = tool_call.args.get("path")
+    payload = _json_body(tool_call)
+    reason = (
+        f"Write approval required before {method} {path}. "
+        f"Exact payload: {json.dumps(payload, default=str)}. "
+        "Approve to proceed, or reject to stop without writing."
+    )
+    action = await _ask_menu(
+        registry=registry,
+        memory=memory,
+        tracer=tracer,
+        step_idx=step_idx,
+        reason=reason,
+        options=list(APPROVAL_OPTIONS),
+        reasoning="write_approval",
+    )
+    if action == "approve":
+        approved_sigs.add(sig)
+    return action
 
 
 async def run(
@@ -153,6 +339,7 @@ async def run(
     tracer.log_run_start(task, settings.agent_model)
     final_summary = ""
     aborted = False
+    approved_sigs: set[str] = set()
 
     try:
         for step_idx in range(max_steps):
@@ -253,6 +440,31 @@ async def run(
                     reasoning=tool_call.reasoning,
                 )
 
+            # Pre-write approval gate (finance / leave / any mutating API).
+            if (
+                settings.require_write_approval
+                and _is_mutating_api(tool_call)
+                and tool_call.tool == "api"
+            ):
+                action = await _request_write_approval(
+                    registry=registry,
+                    memory=memory,
+                    tracer=tracer,
+                    step_idx=step_idx,
+                    tool_call=tool_call,
+                    approved_sigs=approved_sigs,
+                )
+                if action != "approve":
+                    aborted = True
+                    final_summary = (
+                        "User rejected write approval. No mutating request was sent.\n"
+                        f"Proposed: {str(tool_call.args.get('method', '')).upper()} "
+                        f"{tool_call.args.get('path')} "
+                        f"payload={json.dumps(_json_body(tool_call), default=str)}\n"
+                        f"Facts gathered: {memory.facts_dict()}"
+                    )
+                    break
+
             obs = await execute_with_retry(
                 registry,
                 tool_call,
@@ -318,15 +530,23 @@ async def run(
             )
 
         if aborted:
-            # Don't re-query finance after a deliberate abort — that reads like a
+            # Don't re-query finance after a deliberate stop — that reads like a
             # false "verification failed" when the failure was already intentional.
+            reject_stop = "rejected write approval" in final_summary.lower()
             verification = VerificationResult(
                 passed=False,
                 checks=[
-                    "skipped: user aborted after escalation",
-                    "no independent re-query after abort",
+                    (
+                        "skipped: user rejected write approval"
+                        if reject_stop
+                        else "skipped: user aborted after escalation"
+                    ),
+                    "no independent re-query after user stop",
                 ],
-                details={"reason": "user_aborted", "facts": memory.facts_dict()},
+                details={
+                    "reason": "write_rejected" if reject_stop else "user_aborted",
+                    "facts": memory.facts_dict(),
+                },
                 method="skipped_abort",
             )
         else:

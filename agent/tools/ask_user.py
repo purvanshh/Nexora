@@ -13,6 +13,9 @@ from agent.tools.base import Tool
 AskCallback = Callable[[str, list[str] | None], Awaitable[str] | str]
 
 MENU_OPTIONS = ["retry", "skip", "abort"]
+APPROVAL_OPTIONS = ["approve", "reject"]
+
+# Global aliases used only when they map into the offered options.
 _ALIASES = {
     "r": "retry",
     "retry": "retry",
@@ -20,6 +23,12 @@ _ALIASES = {
     "skip": "skip",
     "a": "abort",
     "abort": "abort",
+    "y": "approve",
+    "yes": "approve",
+    "approve": "approve",
+    "n": "reject",
+    "no": "reject",
+    "reject": "reject",
 }
 
 
@@ -31,11 +40,21 @@ class AskUserArgs(BaseModel):
     )
 
 
+def format_menu(options: list[str]) -> str:
+    """Render (a)pprove / (r)eject style shortcuts from option words."""
+    parts: list[str] = []
+    for opt in options:
+        if not opt:
+            continue
+        parts.append(f"({opt[0]}){opt[1:]}")
+    return " / ".join(parts)
+
+
 class AskUserTool(Tool):
     name = "ask_user"
     description = (
-        "Ask the human for clarification via a constrained menu: "
-        "retry / skip / abort. Use when stuck or before irreversible actions."
+        "Ask the human via a constrained menu. Use for escalation "
+        "(retry/skip/abort) or write approval (approve/reject)."
     )
     args_schema = AskUserArgs
 
@@ -46,12 +65,24 @@ class AskUserTool(Tool):
     @staticmethod
     def normalize_answer(raw: str, options: list[str]) -> str | None:
         text = raw.strip().lower()
+        if not text or not options:
+            return None
+        # Exact match against offered options first.
+        for opt in options:
+            if text == opt.lower():
+                return opt
+        # First-letter / "(x)ption" against offered options (so "a" = approve
+        # when approve is offered, abort when abort is offered).
+        for opt in options:
+            initial = opt.lower()[0]
+            if text == initial or text.startswith(initial + ")"):
+                return opt
+        # Global aliases only if they land in the offered set.
         if text in _ALIASES:
             mapped = _ALIASES[text]
-            return mapped if mapped in options or mapped in MENU_OPTIONS else None
-        for opt in options:
-            if text == opt.lower() or text.startswith(opt.lower()[0] + ")"):
-                return opt
+            for opt in options:
+                if opt.lower() == mapped:
+                    return opt
         return None
 
     async def run(self, args: BaseModel) -> Observation:
@@ -64,10 +95,10 @@ class AskUserTool(Tool):
                 if hasattr(answer, "__await__"):
                     answer = await answer  # type: ignore[misc]
             else:
-                prompt = args.question
-                prompt += (
-                    "\nChoose one: (r)etry / (s)kip / (a)bort"
-                    f"\nOptions: {', '.join(options)}\n> "
+                prompt = (
+                    f"{args.question}\n"
+                    f"Choose one: {format_menu(options)}\n"
+                    f"Options: {', '.join(options)}\n> "
                 )
                 answer = input(prompt)
 
@@ -76,13 +107,19 @@ class AskUserTool(Tool):
             if normalized is None:
                 self._unclear_count += 1
                 if self._unclear_count >= 2:
-                    normalized = "abort"
-                    note = "unclear_answer_defaulted_to_abort"
+                    # Prefer reject/abort as the safe default when offered.
+                    if "reject" in options:
+                        normalized = "reject"
+                    elif "abort" in options:
+                        normalized = "abort"
+                    else:
+                        normalized = options[-1]
+                    note = "unclear_answer_defaulted_to_safe_stop"
                 else:
                     return Observation(
                         ok=False,
                         error=(
-                            "Unclear answer. Reply with retry, skip, or abort "
+                            f"Unclear answer. Reply with one of: {', '.join(options)} "
                             f"(attempt {self._unclear_count}/2)."
                         ),
                         data={

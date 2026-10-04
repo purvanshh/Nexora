@@ -14,7 +14,13 @@ SEED_DIR = Path(__file__).resolve().parent / "seed"
 def _ensure_seed_copies() -> None:
     """Keep immutable seed snapshots for reset."""
     SEED_DIR.mkdir(parents=True, exist_ok=True)
-    for name in ("emails.json", "invoices.json", "employees.json", "payslips.json"):
+    for name in (
+        "emails.json",
+        "invoices.json",
+        "employees.json",
+        "payslips.json",
+        "leave_requests.json",
+    ):
         seed_path = SEED_DIR / name
         data_path = DATA_DIR / name
         if not seed_path.exists() and data_path.exists():
@@ -23,7 +29,13 @@ def _ensure_seed_copies() -> None:
 
 def reset_data() -> None:
     _ensure_seed_copies()
-    for name in ("emails.json", "invoices.json", "employees.json", "payslips.json"):
+    for name in (
+        "emails.json",
+        "invoices.json",
+        "employees.json",
+        "payslips.json",
+        "leave_requests.json",
+    ):
         src = SEED_DIR / name
         dst = DATA_DIR / name
         if src.exists():

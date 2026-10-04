@@ -45,8 +45,10 @@ async def email_page(request: Request, mail_id: str) -> HTMLResponse:
 async def list_mail(sender: str | None = None) -> list[dict]:
     emails = _emails_sorted()
     if sender:
-        sender_l = sender.lower()
-        emails = [e for e in emails if sender_l in str(e.get("sender", "")).lower()]
+        # Exact match (case-insensitive). Substring would collapse "Acme Corp"
+        # into the "Acme Corporation" decoy and hide the latest-invoice test.
+        sender_l = sender.lower().strip()
+        emails = [e for e in emails if str(e.get("sender", "")).lower().strip() == sender_l]
     return emails
 
 

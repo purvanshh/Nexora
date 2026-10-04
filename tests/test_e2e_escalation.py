@@ -86,12 +86,16 @@ async def test_e2e_escalation_abort_on_permanent_fail(
         trace_dir=tmp_path / "traces",
         headless=True,
         agent_retries=2,
+        require_write_approval=True,
     )
     answers: list[str] = []
 
     def ask_cb(question: str, options: list[str] | None) -> str:
         answers.append(question)
-        return "a"  # abort
+        opts = [o.lower() for o in (options or [])]
+        if "approve" in opts:
+            return "approve"
+        return "a"  # abort on escalation
 
     registry = get_default_registry(
         settings,

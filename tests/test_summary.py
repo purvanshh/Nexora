@@ -22,8 +22,9 @@ def test_invoice_summary_template() -> None:
     assert "$1,250.00" in text
     assert "2025-03-15" in text
     assert "Verified" in text
-    assert "{" not in text
     assert "unknown" not in text.lower()
+    # Without verifier details, no embedded record JSON yet.
+    assert "Source mail record:" not in text
 
 
 def test_invoice_summary_missing_id_is_explicit() -> None:
@@ -52,4 +53,5 @@ def test_payslip_summary_template() -> None:
     )
     assert "Employee 42" in text
     assert "$5,412.80" in text
-    assert "/api/payslips/42" in text
+    assert "Verified" in text
+    assert "re-queried the mock app" in text

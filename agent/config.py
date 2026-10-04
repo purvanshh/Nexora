@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     mock_app_url: str = "http://localhost:8000"
     headless: bool = True
     chaos: int = 0
+    # Pause before mutating API calls (POST/PUT/PATCH/DELETE) for human approve/reject.
+    require_write_approval: bool = True
     workspace_dir: Path = Path("./workspace")
     trace_dir: Path = Path("./traces")
     log_level: str = "INFO"

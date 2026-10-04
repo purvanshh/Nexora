@@ -10,13 +10,15 @@ from agent.config import Settings, get_settings
 from agent.memory import Memory
 from agent.models import VerificationResult
 
-TaskKind = Literal["invoice", "payslip", "other"]
+TaskKind = Literal["invoice", "payslip", "leave", "other"]
 
 
 def classify_task(task: str) -> TaskKind:
     task_l = task.lower()
+    if "leave" in task_l or "time off" in task_l or "pto" in task_l:
+        return "leave"
     if "payslip" in task_l or "net pay" in task_l or (
-        "employee" in task_l and "invoice" not in task_l
+        "employee" in task_l and "invoice" not in task_l and "leave" not in task_l
     ):
         return "payslip"
     if "invoice" in task_l or "finance" in task_l or "acme" in task_l:
@@ -96,6 +98,18 @@ def scope_allows(kind: TaskKind, mutations: list[dict[str, Any]]) -> tuple[bool,
                     )
             elif m["tool"] == "files":
                 violations.append(f"scope_violation: unexpected file write {m['path']}")
+    elif kind == "leave":
+        for m in mutations:
+            if m["tool"] == "api":
+                path = str(m.get("path") or "")
+                if m["method"] == "POST" and "/api/leave" in path:
+                    continue
+                if m["method"] in {"POST", "PUT", "PATCH", "DELETE"}:
+                    violations.append(
+                        f"scope_violation: unexpected {m['method']} {path}"
+                    )
+            elif m["tool"] == "files":
+                violations.append(f"scope_violation: unexpected file write {m['path']}")
     return (len(violations) == 0, violations)
 
 
@@ -132,6 +146,8 @@ class Verifier:
             outcome = await self._verify_payslip(task, memory, details, checks)
         elif kind == "invoice":
             outcome = await self._verify_invoice(task, memory, details, checks)
+        elif kind == "leave":
+            outcome = await self._verify_leave(task, memory, details, checks)
         else:
             checks.append("Unknown task kind; skipped deep verification")
             outcome = VerificationResult(
@@ -280,6 +296,59 @@ class Verifier:
             passed = match is not None and claim_ok and id_ok and claim_id_ok
             return VerificationResult(
                 passed=passed,
+                checks=checks,
+                details=details,
+                method="api_requery",
+            )
+
+    async def _verify_leave(
+        self,
+        task: str,
+        memory: Memory,
+        details: dict[str, Any],
+        checks: list[str],
+    ) -> VerificationResult:
+        facts = memory.facts_dict()
+        emp_id = _employee_id_from_task(task) or facts.get("employee_id")
+        start = facts.get("leave_start") or facts.get("start_date")
+        end = facts.get("leave_end") or facts.get("end_date")
+        reason = facts.get("leave_reason") or facts.get("reason")
+
+        async with httpx.AsyncClient(base_url=self.settings.base_url, timeout=15.0) as client:
+            if emp_id is None:
+                return VerificationResult(
+                    passed=False,
+                    checks=checks + ["No employee_id for leave verification"],
+                    details=details,
+                    method="api_requery",
+                )
+            checks.append(f"GET /api/leave?employee_id={emp_id}")
+            resp = await client.get("/api/leave", params={"employee_id": int(emp_id)})
+            details["leave_list"] = {"status": resp.status_code, "body": _safe_json(resp)}
+            if resp.status_code != 200:
+                return VerificationResult(
+                    passed=False,
+                    checks=checks + ["Leave list query failed"],
+                    details=details,
+                    method="api_requery",
+                )
+            match = None
+            for item in resp.json():
+                if (
+                    str(item.get("start_date")) == str(start)
+                    and str(item.get("end_date")) == str(end)
+                    and (reason is None or str(item.get("reason")) == str(reason))
+                ):
+                    match = item
+                    break
+            details["leave_match"] = match
+            checks.append(
+                "Leave record matches claimed dates/reason"
+                if match
+                else "No leave record matching claimed dates/reason"
+            )
+            return VerificationResult(
+                passed=match is not None,
                 checks=checks,
                 details=details,
                 method="api_requery",

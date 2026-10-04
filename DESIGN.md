@@ -13,12 +13,16 @@ A full upfront plan looks tidy in demos, then collapses when reality diverges �
 The executor can hallucinate success ("form submitted") while the finance DB stays empty. Worse, it can answer the user's question *and* perform unrelated writes. The verifier:
 
 1. Re-derives the correct outcome from source APIs (does not start from the agent's claim).
-2. Confirms system state with a separate query (e.g. finance record by invoice ID).
+2. Confirms system state with a separate query.
 3. Fails on **scope violations** (e.g. creating an invoice during a payslip lookup).
 
-After a deliberate user **abort**, verification is skipped — re-querying finance would look like a second failure on an intentional stop.
+It is independent of the executor's narrative, not of the mock app. After a deliberate user abort/reject, verification is skipped.
 
 Failed verification yields `partial` / failed — not an infinite repair loop.
+
+## Why a pre-write approval gate
+
+Post-failure escalation alone is not enough for a finance write. With `REQUIRE_WRITE_APPROVAL=1` (default), every mutating API call pauses with the exact method, path, and JSON payload and asks approve/reject. Identical approved payloads are not re-prompted across retries.
 
 ## Why a mock app
 
@@ -27,47 +31,46 @@ The brief forbids real credentials and live third-party sites. A local FastAPI a
 - `CHAOS=1` — first invoice POST returns 500, then succeeds (retry demo)
 - `PERMANENT_FAIL=1` — every invoice POST returns 500 (escalation demo)
 
+Seed mail includes older Acme invoices, a malformed Acme reminder, and an **Acme Corporation** decoy sender so "latest Acme Corp" requires correct sender matching.
+
 ## Why no agent framework
 
-LangChain/CrewAI hide the loop behind abstractions. This prototype's value is showing we understand planning, tool contracts, retries, escalation, and verification — so the ReAct loop is custom and short enough to read in one sitting.
+LangChain / CrewAI / LangGraph hide the loop behind abstractions. This prototype's value is showing we understand planning, tool contracts, retries, approval, escalation, and verification — so the ReAct loop is custom and short enough to read in one sitting. The ideas overlap with graph-based agents; the implementation stays explicit.
 
-## Why Playwright `launch()`, not CDP
+## Why Playwright `launch()`, not CDP / "computer use"
 
-`BrowserTool` calls `async_playwright().start()` → `chromium.launch()`. It never `connect_over_cdp` to the mock app. Probes to `GET /json/version` on port 8000 come from IDE/devtools CDP discovery against whatever is listening locally — not from our tool. Invoice runs are prompted to confirm `/finance/invoices` in the real browser after POST.
+`BrowserTool` calls `chromium.launch()`. It never `connect_over_cdp` to the mock app. The primary data path is the REST API; the browser is a confirmation step for `/finance/invoices` after a successful invoice POST, not the driver of the whole task.
 
 ## Failure taxonomy
 
 | Class | Response |
 |---|---|
-| Transient (timeout, 5xx) | Retry same tool up to N=`AGENT_RETRIES` with backoff (`make chaos-demo`) |
-| Semantic (4xx validation / conflict) | **No retry** — return observation; planner must correct args |
-| Retries exhausted (incl. permanent 500) | Escalate via `ask_user` (`make escalate-demo`) |
-| No progress (≥3 idle steps) | Same constrained menu |
-| Ambiguity | `ask_user` |
+| Pre-write | Approve/reject menu with exact payload |
+| Transient (timeout, 5xx) | Retry same tool up to N=`AGENT_RETRIES` with backoff; idempotent recover if invoice already exists |
+| Semantic (4xx validation) | **No retry** — return observation; planner must correct args |
+| Conflict (409) with matching record | Treat as success (idempotent recover) |
+| Retries exhausted | Escalate via `ask_user` retry/skip/abort |
+| No progress (≥3 idle steps) | Same escalation menu |
 | Scope violation | Verifier fails with `scope_violation` |
-| User abort | `failed`, facts preserved, verification skipped, clean exit |
-
-### Escalation menu
-
-Options are exactly `["retry", "skip", "abort"]` (shortcuts `r` / `s` / `a`). Free-text "inform" was removed: the prototype cannot honor an open-ended info branch, and offering it created a dead loop.
-
-Escalation copy states that the agent could not complete the action after N attempts — it does **not** claim the failure was transient, because `PERMANENT_FAIL` is persistent.
+| User abort / reject | `failed`, facts preserved, verification skipped |
 
 ### Honest gap
 
-Retry policy and escalation policy are still coupled: a permanently-500ing endpoint is treated like a blip (retry N times) before the human is asked. A production worker should classify transient vs persistent *before* retrying, and escalate immediately on the latter.
+Retry policy and escalation policy are still coupled for permanent 500s: we retry like a blip, then escalate. Production should classify transient vs persistent *before* retrying.
+
+Deep verification is still per task-kind (`invoice` / `payslip` / `leave`). Adding a new write task means extending the verifier (documented in the README). The shared loop stays the same — see leave as the second write example.
 
 ## Scope as a product constraint
 
 An autonomous worker that completes the asked question *and* mutates unrelated systems is a liability. Verification inspects the mutation log from the run, not only the final claimed fact.
 
-## Invoice identity
+## Invoice identity and POST safety
 
-The finance API honors a client-supplied `invoice_id` when present (409 on conflict). The verifier re-fetches the source email and checks that the saved record's ID matches — so the summary cannot invent a different invoice number than the mail.
+The finance API honors a client-supplied `invoice_id` (409 on conflict). Retries after ambiguous 500s check GET-by-id and treat a matching record as success so we do not create duplicates or die on our own write.
 
 ## Summaries
 
-User-facing summaries are **templates** filled from scratchpad facts + verifier result (`agent/summary.py`). No second LLM call — numbers cannot drift from remembered facts. On abort, the summary honestly reports that the task could not be completed and lists facts gathered before giving up.
+User-facing summaries are **templates** filled from scratchpad facts + verifier details. They embed compact JSON snapshots of source/target records so evidence is not only a dead `localhost` URL.
 
 ## Cost / latency budget
 

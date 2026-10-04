@@ -62,6 +62,29 @@ class APITool(Tool):
                 error = f"HTTP {resp.status_code}"
                 if detail is not None:
                     error = f"{error}: {detail}"
+            # Prefer durable record snapshots over bare localhost URLs in evidence.
+            evidence: list[str] = [url]
+            if ok and isinstance(body, dict):
+                keys = [
+                    k
+                    for k in (
+                        "invoice_id",
+                        "id",
+                        "sender",
+                        "amount",
+                        "due_date",
+                        "net_pay",
+                        "employee_id",
+                        "start_date",
+                        "end_date",
+                        "reason",
+                        "status",
+                    )
+                    if k in body
+                ]
+                if keys:
+                    slim = {k: body[k] for k in keys}
+                    evidence.append(f"record:{slim}")
             return Observation(
                 ok=ok,
                 data={
@@ -73,7 +96,7 @@ class APITool(Tool):
                 },
                 error=error,
                 duration_ms=int((time.perf_counter() - started) * 1000),
-                evidence=[url],
+                evidence=evidence,
             )
         except Exception as exc:  # noqa: BLE001
             return Observation(

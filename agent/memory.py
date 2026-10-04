@@ -108,6 +108,19 @@ class Memory:
         """Soft-finish heuristic based on task keywords."""
         task_l = self.task.lower()
         facts = self.facts_dict()
+        if "leave" in task_l or "time off" in task_l:
+            wrote = any(
+                s.tool_call
+                and s.tool_call.tool == "api"
+                and str(s.tool_call.args.get("method", "")).upper() == "POST"
+                and "/api/leave" in str(s.tool_call.args.get("path", ""))
+                and s.observation
+                and s.observation.ok
+                for s in self.steps
+            )
+            return wrote and (
+                "leave_start" in facts or "start_date" in facts
+            ) and ("employee_id" in facts or "42" in self.task)
         if "payslip" in task_l or "net pay" in task_l:
             return "net_pay" in facts and (
                 "employee_id" in facts or "42" in self.task

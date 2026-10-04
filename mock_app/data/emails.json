@@ -57,5 +57,17 @@
     "due_date": "2025-03-18",
     "invoice_id": "INV-BAD",
     "malformed": true
+  },
+  {
+    "id": "mail-006",
+    "from": "ap@acme-corporation.example",
+    "sender": "Acme Corporation",
+    "subject": "Acme Corporation statement ACM-900 (decoy similar sender)",
+    "timestamp": "2025-03-11T18:00:00Z",
+    "body": "Decoy sender name close to Acme Corp.\nInvoice ACM-900\nAmount: $9,999.00\nDue date: 2025-03-28\nDo not confuse with Acme Corp.",
+    "amount": 9999.0,
+    "due_date": "2025-03-28",
+    "invoice_id": "ACM-900",
+    "malformed": false
   }
 ]

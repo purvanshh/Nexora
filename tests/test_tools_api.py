@@ -15,7 +15,7 @@ async def test_api_list_mail_200(mock_app: str) -> None:
     assert obs.data is not None
     assert obs.data["status_code"] == 200
     assert isinstance(obs.data["body"], list)
-    assert len(obs.data["body"]) == 5
+    assert len(obs.data["body"]) == 6  # includes Acme Corporation decoy
 
 
 @pytest.mark.asyncio
