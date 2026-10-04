@@ -1,4 +1,4 @@
-.PHONY: install lint test demo primary secondary leave-demo chaos-demo escalate-demo mock seed reset check-scripts
+.PHONY: install lint test demo primary secondary leave-demo chaos-demo escalate-demo reliability smoke mock seed reset check-scripts
 
 PRIMARY_TASK := Find the latest invoice from Acme Corp in the mail app, extract amount and due date, enter it into the finance system, and confirm it is saved.
 SECONDARY_TASK := Look up employee 42, get their latest payslip, and tell me their net pay.
@@ -25,6 +25,8 @@ mock:
 	uv run uvicorn mock_app.main:app --host 127.0.0.1 --port 8000 --reload
 
 # All agent targets go through run_demo.sh so the mock server lifecycle is consistent.
+# Interactive demos prompt for write approval. For a non-interactive skim:
+#   AUTO_APPROVE=1 make demo
 demo primary:
 	bash scripts/run_demo.sh "$(PRIMARY_TASK)"
 
@@ -41,5 +43,12 @@ chaos-demo:
 # Every invoice POST returns 500 — approve the write (`a`), then abort on escalate (`a`).
 escalate-demo:
 	PERMANENT_FAIL=1 bash scripts/run_demo.sh "$(PRIMARY_TASK)"
+
+# Live reliability sample (10 primary + 10 leave) with AUTO_APPROVE=1.
+reliability:
+	bash scripts/reliability_run.sh
+
+smoke:
+	bash scripts/smoke_check.sh
 
 reset: seed

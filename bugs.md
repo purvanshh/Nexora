@@ -2,6 +2,32 @@
 
 Living list of defects found while building Nexora, including the pre-submit review findings. Newest issues first within each section.
 
+## Consistency pass (post-approval-gate review)
+
+### B-28 — Leave live runs 0/10: POST ok but verifier had no facts
+**Symptom:** Model posted the correct leave body then finished without `remember`; verifier compared `None` dates and failed every AUTO_APPROVE leave run.  
+**Fix:** Resolve leave expected fields from scratchpad, then successful POST body, then task text. Summary uses the same expected fields. Prompt still asks to remember before finish.
+
+### B-27 — Interactive `make demo` blocked reviewers
+**Symptom:** Write approval made demos require a TTY.  
+**Fix:** `AUTO_APPROVE=1` answers approve on write gates (`AskUserTool.auto_approve`). Documented in README and Make.
+
+### B-26 — Clarification missing from human-in-the-loop surface
+**Symptom:** Only menus existed; brief asks for clarification on ambiguity.  
+**Fix:** `ask_user` with `options=[]` is free-text mode; system prompt tells the planner to clarify on 0/2+ senders.
+
+### B-25 — Leave verifier accepted duplicates
+**Symptom:** Existence check passed even if retry created two identical leave rows.  
+**Fix:** Leave verification requires exactly one matching record (`tests/test_leave_verifier.py`).
+
+### B-24 — 409 recovery overclaimed for all writes
+**Symptom:** Design text implied POST retries were generally safe; leave IDs are server-minted.  
+**Fix:** Limitations + DESIGN call out invoice-only idempotent recover; leave needs API idempotency keys.
+
+### B-23 — README had internal smoke checklist / em dashes / Readme casing
+**Symptom:** Pre-submit block in public docs; AI-looking punctuation; `Readme.md` vs `README.md`.  
+**Fix:** Moved smoke to `scripts/smoke_check.sh`; cleaned prose; standardized on `README.md`.
+
 ## Live demo warts
 
 ### B-22 — Leave POST used scratchpad keys (`leave_start`) → 422

@@ -27,6 +27,7 @@ traces/*
 !traces/secondary_payslip.jsonl
 !traces/primary_happy.jsonl
 !traces/primary_with_retry.jsonl
+!traces/reliability_*.md
 traces/*/
 
 # IDE / OS
