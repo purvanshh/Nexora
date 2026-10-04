@@ -6,9 +6,9 @@ A narrow intern prototype: give it a natural-language office task, and it plans,
 
 ## Demo video
 
-**[Watch the walkthrough](https://drive.google.com/drive/folders/1yz5ZYBMtdx6RqCuQBd87ZDCGW2o-jGrZ?usp=sharing)** (~5 min): primary demo, trace, chaos retry, escalation/abort, secondary, limitations.
+**[Watch the walkthrough](https://youtu.be/v2cIXfSJesI)** (~5 min): primary demo, trace, chaos retry, escalation/abort, secondary, limitations.
 
-If the recording predates the approval gate or leave demo, treat the live `make` targets as source of truth until an updated cut is linked.
+The walkthrough covers the approval gate. For the leave write, the live `make leave-demo` target is the source of truth.
 
 ## Setup (5 commands)
 
