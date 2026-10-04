@@ -36,7 +36,7 @@ LangChain/CrewAI hide the loop behind abstractions. This prototype's value is sh
 |---|---|
 | Transient (timeout, 500) | Retry same tool up to N=2 with backoff (`make chaos-demo`) |
 | Persistent transient (`PERMANENT_FAIL=1`) | Exhaust retries → escalate (`make escalate-demo`) |
-| No progress (≥3 idle steps) | Constrained `ask_user`: retry / skip / abort / inform |
+| No progress (≥3 idle steps) | Constrained `ask_user`: retry / skip / abort |
 | Ambiguity | `ask_user` |
 | Scope violation | Verifier fails with `scope_violation` |
 | Impossible / exhausted | `partial` or `failed` with evidence |

@@ -80,7 +80,7 @@ def should_escalate(memory: Memory) -> bool:
 
 def _abort_summary(memory: Memory) -> str:
     return (
-        "Could not complete the task. After repeated transient failures the agent "
+        "Could not complete the task. After exhausting retries the agent "
         "escalated to the user, who chose abort.\n"
         f"Last error: {memory.last_error}\n"
         f"Facts gathered before giving up: {memory.facts_dict()}"
@@ -284,8 +284,10 @@ async def run(
 
             retries_exhausted = bool(obs.data and obs.data.get("retries_exhausted"))
             if retries_exhausted or should_escalate(memory):
+                attempts = (obs.data or {}).get("attempts", "?")
                 reason = (
-                    "I exhausted retries on a transient failure and cannot safely proceed."
+                    f"I could not complete the action after {attempts} attempts "
+                    "and cannot safely proceed."
                     if retries_exhausted
                     else "I'm stuck after repeated failures or no progress."
                 )

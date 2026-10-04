@@ -112,7 +112,9 @@ async def test_e2e_escalation_abort_on_permanent_fail(
     assert result.verification is not None
     assert result.verification.method == "skipped_abort"
     assert answers, "expected an escalation prompt"
-    assert any("retry" in a.lower() or "exhaust" in a.lower() for a in answers)
+    assert any(
+        "attempt" in a.lower() or "cannot safely proceed" in a.lower() for a in answers
+    )
 
     # Retries exhausted should be visible on the failed POST observation.
     post_steps = [

@@ -12,7 +12,7 @@ from agent.tools.base import Tool
 
 AskCallback = Callable[[str, list[str] | None], Awaitable[str] | str]
 
-MENU_OPTIONS = ["retry", "skip", "abort", "provide_info"]
+MENU_OPTIONS = ["retry", "skip", "abort"]
 _ALIASES = {
     "r": "retry",
     "retry": "retry",
@@ -20,10 +20,6 @@ _ALIASES = {
     "skip": "skip",
     "a": "abort",
     "abort": "abort",
-    "i": "provide_info",
-    "inform": "provide_info",
-    "provide_info": "provide_info",
-    "provide-info": "provide_info",
 }
 
 
@@ -39,7 +35,7 @@ class AskUserTool(Tool):
     name = "ask_user"
     description = (
         "Ask the human for clarification via a constrained menu: "
-        "retry / skip / abort / provide_info. Use when stuck or before irreversible actions."
+        "retry / skip / abort. Use when stuck or before irreversible actions."
     )
     args_schema = AskUserArgs
 
@@ -70,7 +66,7 @@ class AskUserTool(Tool):
             else:
                 prompt = args.question
                 prompt += (
-                    "\nChoose one: (r)etry / (s)kip / (a)bort / (i)nform"
+                    "\nChoose one: (r)etry / (s)kip / (a)bort"
                     f"\nOptions: {', '.join(options)}\n> "
                 )
                 answer = input(prompt)
@@ -86,7 +82,7 @@ class AskUserTool(Tool):
                     return Observation(
                         ok=False,
                         error=(
-                            "Unclear answer. Reply with retry, skip, abort, or provide_info "
+                            "Unclear answer. Reply with retry, skip, or abort "
                             f"(attempt {self._unclear_count}/2)."
                         ),
                         data={

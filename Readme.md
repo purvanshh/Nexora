@@ -44,7 +44,7 @@ HEADLESS=false make demo
        │      ├─ BrowserTool (Playwright chromium.launch)
        │      ├─ FileTool (sandboxed workspace)
        │      ├─ APITool (httpx → mock app)
-       │      └─ AskUserTool (retry/skip/abort/inform)
+       │      └─ AskUserTool (retry/skip/abort)
        │
        ├──► Memory (scratchpad facts + progress)
        ├──► Verifier (independent re-query + scope check)
