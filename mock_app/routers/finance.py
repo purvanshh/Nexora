@@ -107,9 +107,23 @@ def _build_invoice_record(
 
 @router.post("/api/invoices")
 async def create_invoice(payload: InvoiceCreate) -> JSONResponse:
-    """Create an invoice. When CHAOS=1, the first POST returns 500 (read per-request)."""
+    """Create an invoice.
+
+    Failure injection (read per-request from env):
+    - PERMANENT_FAIL=1 → every POST returns 500 (escalation demo)
+    - CHAOS=1 → only the first POST returns 500 (retry demo)
+    """
     global _chaos_posts
-    # Read env on every request so demo scripts can inject CHAOS after import.
+    if os.environ.get("PERMANENT_FAIL", "0").strip() == "1":
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Injected permanent failure on every POST",
+                "permanent_fail": True,
+                "hint": "agent should retry, then escalate to the user",
+            },
+        )
+
     chaos_on = os.environ.get("CHAOS", "0").strip() == "1"
     if chaos_on and _chaos_posts == 0:
         _chaos_posts += 1

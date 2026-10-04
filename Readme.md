@@ -17,8 +17,9 @@ make test                     # tools + verifier + stubbed E2E
 Other scenarios (same agent loop, different prompt only):
 
 ```bash
-make secondary    # employee 42 payslip / net pay
-make chaos-demo   # CHAOS=1 → first invoice POST returns 500, retry → 201
+make secondary       # employee 42 payslip / net pay
+make chaos-demo      # CHAOS=1 → first invoice POST returns 500, retry → 201
+make escalate-demo   # PERMANENT_FAIL=1 → every POST 500; choose (a)bort when prompted
 ```
 
 Visible browser (Playwright launches its own Chromium — not CDP against the mock app):
@@ -109,6 +110,7 @@ Full write-up: [`DESIGN.md`](DESIGN.md).
 make demo
 make chaos-demo
 make secondary
+make escalate-demo
 ```
 
 ## Known limitations
@@ -116,6 +118,7 @@ make secondary
 - Only works against the bundled mock app
 - LLM may still skip the browser confirmation step on some runs (API path alone can satisfy the task; soft-finish waits for a browser step on invoice tasks)
 - IDE/devtools may probe `localhost:8000/json/version` (Chrome CDP discovery) — that is **not** our browser tool; Playwright uses `chromium.launch()`
+- Escalation after exhausted transient retries is proven via `make escalate-demo` / `tests/test_e2e_escalation.py` (stubbed LLM + real permanent-500 mock)
 - No persistent memory across sessions
 - Verification assumes query endpoints exist
 - Single-task execution; no queueing

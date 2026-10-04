@@ -41,6 +41,13 @@ def is_retryable(obs: Observation) -> bool:
     return any(marker in err for marker in transient_markers)
 
 
+def _with_retry_meta(obs: Observation, *, attempts: int, exhausted: bool) -> Observation:
+    data = dict(obs.data or {})
+    data["attempts"] = attempts
+    data["retries_exhausted"] = exhausted
+    return obs.model_copy(update={"data": data})
+
+
 async def execute_with_retry(
     registry: ToolRegistry,
     tool_call: ToolCall,
@@ -55,20 +62,29 @@ async def execute_with_retry(
     for attempt in range(attempts):
         obs = await registry.execute(tool_call.tool, tool_call.args)
         if obs.ok:
-            return obs
+            return _with_retry_meta(obs, attempts=attempt + 1, exhausted=False)
         last = obs
         if tracer is not None:
             tracer.log_error(step_idx, obs.error or "unknown", retry=attempt)
         if not is_retryable(obs):
-            return obs
+            return _with_retry_meta(obs, attempts=attempt + 1, exhausted=False)
         if attempt < attempts - 1:
             await asyncio.sleep(0.5)
     assert last is not None
-    return last
+    return _with_retry_meta(last, attempts=attempts, exhausted=True)
 
 
 def should_escalate(memory: Memory) -> bool:
     return memory.consecutive_identical_failures() or memory.consecutive_no_progress >= 3
+
+
+def _abort_summary(memory: Memory) -> str:
+    return (
+        "Could not complete the task. After repeated transient failures the agent "
+        "escalated to the user, who chose abort.\n"
+        f"Last error: {memory.last_error}\n"
+        f"Facts gathered before giving up: {memory.facts_dict()}"
+    )
 
 
 async def _escalate(
@@ -197,9 +213,13 @@ async def run(
                     )
                     if action == "abort":
                         aborted = True
-                        final_summary = "Aborted after user escalation."
+                        final_summary = _abort_summary(memory)
                         break
                     if action == "skip":
+                        final_summary = (
+                            "User chose skip after escalation. Task not completed.\n"
+                            f"Facts gathered: {memory.facts_dict()}"
+                        )
                         break
                 continue
 
@@ -252,7 +272,7 @@ async def run(
                 )
                 if obs.data.get("normalized") == "abort":
                     aborted = True
-                    final_summary = "Aborted after user escalation."
+                    final_summary = _abort_summary(memory)
                     break
 
             made = memory.evaluate_progress(
@@ -262,19 +282,29 @@ async def run(
             )
             memory.mark_progress(made_progress=made)
 
-            if should_escalate(memory):
+            retries_exhausted = bool(obs.data and obs.data.get("retries_exhausted"))
+            if retries_exhausted or should_escalate(memory):
+                reason = (
+                    "I exhausted retries on a transient failure and cannot safely proceed."
+                    if retries_exhausted
+                    else "I'm stuck after repeated failures or no progress."
+                )
                 action = await _escalate(
                     registry=registry,
                     memory=memory,
                     tracer=tracer,
                     step_idx=step_idx,
-                    reason="I'm stuck after repeated failures or no progress.",
+                    reason=reason,
                 )
                 if action == "abort":
                     aborted = True
-                    final_summary = "Aborted after user escalation."
+                    final_summary = _abort_summary(memory)
                     break
                 if action == "skip":
+                    final_summary = (
+                        "User chose skip after escalation. Task not completed.\n"
+                        f"Facts gathered: {memory.facts_dict()}"
+                    )
                     break
                 if action == "retry":
                     memory.consecutive_no_progress = 0

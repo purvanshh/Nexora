@@ -8,6 +8,7 @@ cd "$ROOT"
 _CALLER_CHAOS="${CHAOS-}"
 _CALLER_HEADLESS="${HEADLESS-}"
 _CALLER_MOCK_URL="${MOCK_APP_URL-}"
+_CALLER_PERMANENT="${PERMANENT_FAIL-}"
 
 if [[ -f "$ROOT/.env" ]]; then
   set -a
@@ -16,7 +17,7 @@ if [[ -f "$ROOT/.env" ]]; then
   set +a
 fi
 
-# Restore intentional overrides from `make chaos-demo` etc.
+# Restore intentional overrides from make targets.
 if [[ -n "${_CALLER_CHAOS}" ]]; then
   export CHAOS="${_CALLER_CHAOS}"
 fi
@@ -26,22 +27,26 @@ fi
 if [[ -n "${_CALLER_MOCK_URL}" ]]; then
   export MOCK_APP_URL="${_CALLER_MOCK_URL}"
 fi
+if [[ -n "${_CALLER_PERMANENT}" ]]; then
+  export PERMANENT_FAIL="${_CALLER_PERMANENT}"
+fi
 
 export MOCK_APP_URL="${MOCK_APP_URL:-http://127.0.0.1:8000}"
 export HEADLESS="${HEADLESS:-true}"
 export CHAOS="${CHAOS:-0}"
+export PERMANENT_FAIL="${PERMANENT_FAIL:-0}"
 
 if [[ -z "${OPENAI_API_KEY:-}" || "${OPENAI_API_KEY}" == sk-... ]]; then
   echo "OPENAI_API_KEY missing. Copy .env.example → .env and set your key." >&2
   exit 2
 fi
 
-echo "Starting demo (CHAOS=${CHAOS}, HEADLESS=${HEADLESS}, MOCK_APP_URL=${MOCK_APP_URL})"
+echo "Starting demo (CHAOS=${CHAOS}, PERMANENT_FAIL=${PERMANENT_FAIL}, HEADLESS=${HEADLESS}, MOCK_APP_URL=${MOCK_APP_URL})"
 
 uv run python scripts/seed_reset.py
 
-# Boot mock app in background with explicit CHAOS for the child process.
-CHAOS="${CHAOS}" MOCK_APP_URL="${MOCK_APP_URL}" \
+# Boot mock app with explicit failure-injection flags for the child process.
+CHAOS="${CHAOS}" PERMANENT_FAIL="${PERMANENT_FAIL}" MOCK_APP_URL="${MOCK_APP_URL}" \
   uv run uvicorn mock_app.main:app --host 127.0.0.1 --port 8000 &
 APP_PID=$!
 cleanup() {

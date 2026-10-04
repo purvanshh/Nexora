@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import socket
 import subprocess
 import sys
@@ -23,6 +24,54 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return int(s.getsockname()[1])
+
+
+def _boot_mock_app(*, env_extra: dict[str, str] | None = None) -> Generator[str, None, None]:
+    reset_data()
+    reset_chaos()
+    port = _free_port()
+    base = f"http://127.0.0.1:{port}"
+    env = os.environ.copy()
+    env["CHAOS"] = "0"
+    env["PERMANENT_FAIL"] = "0"
+    if env_extra:
+        env.update(env_extra)
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "mock_app.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=str(ROOT),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        env=env,
+    )
+    try:
+        for _ in range(50):
+            try:
+                r = httpx.get(f"{base}/health", timeout=0.5)
+                if r.status_code == 200:
+                    break
+            except Exception:
+                time.sleep(0.1)
+        else:
+            proc.kill()
+            raise RuntimeError("mock_app failed to start")
+        yield base
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        reset_data()
+        reset_chaos()
 
 
 @pytest.fixture()
@@ -50,42 +99,10 @@ def settings(workspace: Path, tmp_path: Path) -> Settings:
 @pytest.fixture()
 def mock_app() -> Generator[str, None, None]:
     """Boot uvicorn against mock_app.main on a free port; reset data each test."""
-    reset_data()
-    reset_chaos()
-    port = _free_port()
-    base = f"http://127.0.0.1:{port}"
-    proc = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "mock_app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-        ],
-        cwd=str(ROOT),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        for _ in range(50):
-            try:
-                r = httpx.get(f"{base}/", timeout=0.5)
-                if r.status_code == 200:
-                    break
-            except Exception:
-                time.sleep(0.1)
-        else:
-            proc.kill()
-            raise RuntimeError("mock_app failed to start")
-        yield base
-    finally:
-        proc.terminate()
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-        reset_data()
-        reset_chaos()
+    yield from _boot_mock_app()
+
+
+@pytest.fixture()
+def mock_app_permanent_fail() -> Generator[str, None, None]:
+    """Mock app where every invoice POST returns 500."""
+    yield from _boot_mock_app(env_extra={"PERMANENT_FAIL": "1", "CHAOS": "0"})

@@ -58,6 +58,7 @@ async def test_execute_with_retry_does_not_repeat_422() -> None:
     assert not obs.ok
     assert obs.data is not None
     assert obs.data["status_code"] == 422
+    assert obs.data.get("retries_exhausted") is False
     assert tool.calls == 1
 
 
@@ -92,3 +93,38 @@ async def test_execute_with_retry_retries_500() -> None:
     )
     assert obs.ok
     assert tool.calls == 2
+    assert obs.data is not None
+    assert obs.data.get("retries_exhausted") is False
+
+
+@pytest.mark.asyncio
+async def test_execute_with_retry_marks_exhausted_on_persistent_500() -> None:
+    class Always500(Tool):
+        name = "api"
+        description = "always 500"
+        args_schema = _Args
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run(self, args: BaseModel) -> Observation:
+            self.calls += 1
+            return Observation(
+                ok=False,
+                error="HTTP 500",
+                data={"status_code": 500, "body": {"detail": "permanent"}},
+            )
+
+    tool = Always500()
+    registry = ToolRegistry()
+    registry.register(tool)
+    obs = await execute_with_retry(
+        registry,
+        ToolCall(tool="api", args={"x": 1}),
+        retries=2,
+    )
+    assert not obs.ok
+    assert tool.calls == 3
+    assert obs.data is not None
+    assert obs.data.get("retries_exhausted") is True
+

@@ -1,4 +1,4 @@
-.PHONY: install lint test demo primary secondary chaos-demo mock seed reset check-scripts
+.PHONY: install lint test demo primary secondary chaos-demo escalate-demo mock seed reset check-scripts
 
 PRIMARY_TASK := Find the latest invoice from Acme Corp in the mail app, extract amount and due date, enter it into the finance system, and confirm it is saved.
 SECONDARY_TASK := Look up employee 42, get their latest payslip, and tell me their net pay.
@@ -32,5 +32,9 @@ secondary:
 
 chaos-demo:
 	CHAOS=1 bash scripts/run_demo.sh "$(PRIMARY_TASK)"
+
+# Every invoice POST returns 500 — agent retries, then escalates (type `a` to abort).
+escalate-demo:
+	PERMANENT_FAIL=1 bash scripts/run_demo.sh "$(PRIMARY_TASK)"
 
 reset: seed
