@@ -30,6 +30,9 @@ traces/*
 !traces/reliability_*.md
 traces/*/
 
+# Local recording notes (not shipped)
+DEMO_SCRIPT.md
+
 # IDE / OS
 .DS_Store
 .idea/

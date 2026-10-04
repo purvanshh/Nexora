@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import time
 from pathlib import Path
 from typing import Any, Literal
@@ -60,6 +62,26 @@ class BrowserTool(Tool):
         return self._page
 
     async def close(self) -> None:
+        # Visible demos: keep Chromium up so the UI can be shown on camera.
+        # Set BROWSER_HOLD_SECONDS=0 to skip (default is interactive Enter).
+        if not self.headless and self._browser is not None:
+            hold_env = os.environ.get("BROWSER_HOLD_SECONDS", "").strip()
+            if hold_env == "0":
+                pass
+            elif hold_env.isdigit() and int(hold_env) > 0:
+                print(
+                    f"\n[browser] Holding Chromium open for {hold_env}s…",
+                    flush=True,
+                )
+                await asyncio.sleep(int(hold_env))
+            else:
+                print(
+                    "\n[browser] Holding Chromium open for the demo. "
+                    "Look at /finance/invoices, then press Enter to close…",
+                    flush=True,
+                )
+                await asyncio.to_thread(input)
+
         browser, playwright = self._browser, self._playwright
         self._page = None
         self._browser = None
