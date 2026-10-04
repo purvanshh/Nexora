@@ -5,9 +5,9 @@
 1. `api` GET `/api/mail` — list inbox, find newest Acme email with amount.
 2. `api` GET `/api/mail/{id}` — extract amount, due_date, invoice_id.
 3. `remember` each field into scratchpad.
-4. `api` POST `/api/invoices` with sender, amount, due_date, invoice_id.
-5. On HTTP 500, retry once (chaos), else use browser form at `/finance`.
-6. `finish` with summary of what was submitted.
+4. `api` POST `/api/invoices` with sender, amount, due_date, invoice_id (all four).
+5. On HTTP 500, the loop retries transient failures; if exhausted, escalate (retry/skip/abort).
+6. Confirm via browser at `/finance/invoices`, then `finish` with summary of what was submitted.
 
 ## Secondary: employee payslip
 
