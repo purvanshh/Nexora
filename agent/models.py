@@ -52,6 +52,8 @@ class RunResult(BaseModel):
     evidence_paths: list[str] = Field(default_factory=list)
     started_at: datetime
     ended_at: datetime
+    user_aborted: bool = False
+    """True when the human chose abort after escalation (expected failure path)."""
 
 
 class LLMResponse(BaseModel):

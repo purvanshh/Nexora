@@ -106,8 +106,11 @@ async def test_e2e_escalation_abort_on_permanent_fail(
     )
 
     assert result.status == "failed"
+    assert result.user_aborted is True
     assert "could not complete" in result.summary.lower()
     assert "abort" in result.summary.lower()
+    assert result.verification is not None
+    assert result.verification.method == "skipped_abort"
     assert answers, "expected an escalation prompt"
     assert any("retry" in a.lower() or "exhaust" in a.lower() for a in answers)
 

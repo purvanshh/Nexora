@@ -10,7 +10,7 @@ from uuid import uuid4
 from agent.config import Settings, get_settings
 from agent.health import check_mock_app
 from agent.memory import Memory
-from agent.models import LLMResponse, Observation, RunResult, ToolCall
+from agent.models import LLMResponse, Observation, RunResult, ToolCall, VerificationResult
 from agent.planner import LLMClient, OpenAILLMClient, build_prompt
 from agent.summary import build_summary
 from agent.tools.ask_user import MENU_OPTIONS
@@ -315,19 +315,30 @@ async def run(
                 f"Facts: {memory.facts_dict()}"
             )
 
-        verifier = Verifier(settings)
-        verification = await verifier.verify(task, memory, final_summary)
+        if aborted:
+            # Don't re-query finance after a deliberate abort — that reads like a
+            # false "verification failed" when the failure was already intentional.
+            verification = VerificationResult(
+                passed=False,
+                checks=[
+                    "skipped: user aborted after escalation",
+                    "no independent re-query after abort",
+                ],
+                details={"reason": "user_aborted", "facts": memory.facts_dict()},
+                method="skipped_abort",
+            )
+        else:
+            verifier = Verifier(settings)
+            verification = await verifier.verify(task, memory, final_summary)
+            final_summary = build_summary(
+                task, memory, verification, fallback=final_summary
+            )
+
         tracer.log_verification(
             verification.passed,
             verification.checks,
             verification.details,
         )
-
-        # Always prefer a deterministic business summary over raw fact dumps / LLM prose.
-        if not aborted:
-            final_summary = build_summary(
-                task, memory, verification, fallback=final_summary
-            )
 
         evidence: list[str] = []
         for step in memory.steps:
@@ -356,6 +367,7 @@ async def run(
             evidence_paths=evidence,
             started_at=started,
             ended_at=ended,
+            user_aborted=aborted,
         )
         tracer.log_run_end(result)
         return result

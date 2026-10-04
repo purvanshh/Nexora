@@ -73,10 +73,13 @@ def main(
         console.print(Panel(result.summary or "(no summary)", title="Summary"))
         if result.verification:
             v = result.verification
-            console.print(
-                f"\nVerification: {'passed' if v.passed else 'failed'} "
-                f"via {v.method}"
-            )
+            if v.method == "skipped_abort":
+                console.print("\nVerification: skipped (user aborted after escalation)")
+            else:
+                console.print(
+                    f"\nVerification: {'passed' if v.passed else 'failed'} "
+                    f"via {v.method}"
+                )
             for check in v.checks:
                 console.print(f"  • {check}")
         if result.evidence_paths:
@@ -85,7 +88,15 @@ def main(
                 console.print(f"  - {path}")
         if tracer:
             console.print(f"\nTrace: {tracer.path}")
-        raise typer.Exit(code=0 if result.status == "success" else 1)
+        # User abort after escalation is the *expected* outcome of escalate-demo.
+        if result.status == "success" or result.user_aborted:
+            if result.user_aborted:
+                console.print(
+                    "\n[dim]Escalation path completed as expected "
+                    "(retries exhausted → user abort).[/dim]"
+                )
+            raise typer.Exit(code=0)
+        raise typer.Exit(code=1)
 
     asyncio.run(_go())
 
