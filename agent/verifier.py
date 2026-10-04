@@ -308,20 +308,27 @@ class Verifier:
         details: dict[str, Any],
         checks: list[str],
     ) -> VerificationResult:
-        emp_id, start, end, reason = _leave_expected_fields(task, memory)
+        # Expected values come only from the user task text — never from the
+        # agent's POST body or scratchpad (those can only echo a bad write).
+        emp_id, start, end, reason = _leave_expected_from_task(task)
         details["leave_expected"] = {
             "employee_id": emp_id,
             "start_date": start,
             "end_date": end,
             "reason": reason,
+            "source": "task_text",
         }
+        checks.append("Leave expected fields parsed from task text (not agent payload)")
 
         async with httpx.AsyncClient(base_url=self.settings.base_url, timeout=15.0) as client:
-            if emp_id is None or start is None or end is None:
+            if emp_id is None or start is None or end is None or reason is None:
                 return VerificationResult(
                     passed=False,
                     checks=checks
-                    + ["Missing employee_id/start_date/end_date for leave verification"],
+                    + [
+                        "Fail closed: could not parse employee_id/start_date/"
+                        "end_date/reason from task text"
+                    ],
                     details=details,
                     method="api_requery",
                 )
@@ -340,7 +347,7 @@ class Verifier:
                 for item in resp.json()
                 if str(item.get("start_date")) == str(start)
                 and str(item.get("end_date")) == str(end)
-                and (reason is None or str(item.get("reason")) == str(reason))
+                and str(item.get("reason")) == str(reason)
             ]
             details["leave_matches"] = matches
             details["leave_match"] = matches[0] if len(matches) == 1 else None
@@ -434,24 +441,6 @@ def _employee_id_from_task(task: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _leave_payload_from_steps(memory: Memory) -> dict[str, Any]:
-    """Last successful POST /api/leave body (planner often skips remember)."""
-    for step in reversed(memory.steps):
-        tc = step.tool_call
-        if tc is None or tc.tool != "api":
-            continue
-        if str(tc.args.get("method", "")).upper() != "POST":
-            continue
-        if "/api/leave" not in str(tc.args.get("path", "")):
-            continue
-        if not (step.observation and step.observation.ok):
-            continue
-        body = tc.args.get("json") or tc.args.get("json_body") or {}
-        if isinstance(body, dict):
-            return body
-    return {}
-
-
 def _leave_dates_from_task(task: str) -> tuple[str | None, str | None, str | None]:
     import re
 
@@ -465,36 +454,10 @@ def _leave_dates_from_task(task: str) -> tuple[str | None, str | None, str | Non
     return start, end, reason
 
 
-def _leave_expected_fields(
-    task: str, memory: Memory
-) -> tuple[Any, Any, Any, Any]:
-    """Resolve leave fields from facts, then POST body, then task text."""
-    facts = memory.facts_dict()
-    payload = _leave_payload_from_steps(memory)
-    task_start, task_end, task_reason = _leave_dates_from_task(task)
-    emp_id = (
-        _employee_id_from_task(task)
-        or facts.get("employee_id")
-        or payload.get("employee_id")
-    )
-    start = (
-        facts.get("leave_start")
-        or facts.get("start_date")
-        or payload.get("start_date")
-        or task_start
-    )
-    end = (
-        facts.get("leave_end")
-        or facts.get("end_date")
-        or payload.get("end_date")
-        or task_end
-    )
-    reason = (
-        facts.get("leave_reason")
-        or facts.get("reason")
-        or payload.get("reason")
-        or task_reason
-    )
+def _leave_expected_from_task(task: str) -> tuple[Any, Any, Any, Any]:
+    """Parse leave expectations from the user task only. Fail closed upstream if incomplete."""
+    emp_id = _employee_id_from_task(task)
+    start, end, reason = _leave_dates_from_task(task)
     return emp_id, start, end, reason
 
 

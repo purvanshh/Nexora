@@ -15,7 +15,7 @@ The executor can hallucinate success ("form submitted") while the finance DB sta
 1. Re-derives the correct outcome from source APIs (does not start from the agent's claim).
 2. Confirms system state with a separate query.
 3. Fails on scope violations (e.g. creating an invoice during a payslip lookup).
-4. For leave writes, requires exactly one matching record so a duplicate retry cannot silently pass.
+4. For leave writes, derives expected fields from the **user task text only** (never from the agent POST body or scratchpad), then requires exactly one matching record so a wrong or duplicate write cannot silently pass.
 
 It is independent of the executor's narrative, not of the mock app. After a deliberate user abort/reject, verification is skipped.
 
@@ -25,7 +25,7 @@ Failed verification yields `partial` / failed, not an infinite repair loop.
 
 Post-failure escalation alone is not enough for a finance write. With `REQUIRE_WRITE_APPROVAL=1` (default), every mutating API call pauses with the exact method, path, and JSON payload and asks approve/reject. Identical approved payloads are not re-prompted across retries.
 
-`AUTO_APPROVE=1` answers approve automatically so reviewers can skim `make demo` without a TTY. Escalation abort and free-text clarification still need a human when they fire.
+`AUTO_APPROVE` defaults to off. `AUTO_APPROVE=1` answers approve automatically for demos and evals only. Escalation abort and free-text clarification still need a human when they fire.
 
 ## Why free-text clarification
 

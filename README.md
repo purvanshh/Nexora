@@ -22,7 +22,7 @@ make test                     # tools + verifier + stubbed E2E
 
 Write demos pause before any POST with the exact payload. Type `a` (approve) or `r` (reject).
 
-For a non-interactive skim (CI or reviewers):
+`AUTO_APPROVE` defaults to off. Set it only for demos and evals (never for a human-gated production path):
 
 ```bash
 AUTO_APPROVE=1 make demo
@@ -157,14 +157,18 @@ Full write-up: [`DESIGN.md`](DESIGN.md).
 
 Seed mail includes an older Acme invoice, a malformed Acme reminder, and an **Acme Corporation** decoy so "latest Acme Corp" is not trivial.
 
-## Live reliability sample
+## Live sample (not a reliability claim)
 
-Run with `make reliability` (`AUTO_APPROVE=1`, temperature 0). Sample from 2026-10-04 (`traces/reliability_20261004.md`):
+Run with `make reliability` (`AUTO_APPROVE=1`, temperature 0). Numbers from 2026-10-04 (`traces/reliability_20261004.md`):
 
 | Scenario | Passes | Runs | Notes |
 |---|---:|---:|---|
-| Primary (Acme invoice + decoy mail) | 10 | 10 | decoy sender present in seed |
-| Leave write | 10 | 10 | verifier accepts POST body / task dates when scratchpad remember is skipped |
+| Primary (Acme invoice + decoy mail) | 10 | 10 | fixed prompt, happy path, auto-approve |
+| Leave write | 10 | 10 | same caveats; see disclosure below |
+
+This is a **sample**, not measured reliability. At temperature 0 the runs are nearly deterministic, so 10 repeats behave closer to one or two independent samples than to ten. Even if they were independent, 10/10 only supports "true rate above roughly 69% at 95% confidence." Scope: happy path only, no chaos/escalation rows, one fixed prompt wording, `AUTO_APPROVE=1`.
+
+**Disclosure:** the first leave batch was 0/10 because the verifier depended on agent-written `remember` facts (the model POSTed correctly but skipped remember). The measuring instrument was changed before the 10/10 leave sample: leave expectations are now parsed from the **task text only**. An earlier intermediate fallback that trusted the agent's POST body was removed; that would only have caught server mangling, not a wrong write. See `bugs.md` (B-28/B-29) and `tests/test_leave_verifier.py` (wrong-date negative test).
 
 Wall-clock times are not compared across interactive vs auto-approve runs (human typing at the approve prompt is not agent latency).
 

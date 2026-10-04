@@ -4,9 +4,13 @@ Living list of defects found while building Nexora, including the pre-submit rev
 
 ## Consistency pass (post-approval-gate review)
 
+### B-29 — Leave verifier briefly trusted the agent POST body
+**Symptom:** After the 0/10 leave sample, an intermediate fix fell back to the agent's POST payload for "expected" dates. That can only catch server mangling, not a wrong write.  
+**Fix:** Expected leave fields come **only** from parsing the user task text. If parse fails, fail closed. Negative test: stubbed POST of `2025-04-02` when the task asks for `2025-04-01` must fail (`tests/test_leave_verifier.py`).
+
 ### B-28 — Leave live runs 0/10: POST ok but verifier had no facts
-**Symptom:** Model posted the correct leave body then finished without `remember`; verifier compared `None` dates and failed every AUTO_APPROVE leave run.  
-**Fix:** Resolve leave expected fields from scratchpad, then successful POST body, then task text. Summary uses the same expected fields. Prompt still asks to remember before finish.
+**Symptom:** First AUTO_APPROVE leave batch was 0/10: the model POSTed correctly but never called `remember`, so the verifier had no expected values and failed every run. The measuring instrument was changed before the later 10/10 sample.  
+**Fix (final):** Parse expected employee_id / dates / reason from the **task text only** (not scratchpad, not POST body). Disclose this in the README sample section. Prompt still asks the agent to remember before finish.
 
 ### B-27 — Interactive `make demo` blocked reviewers
 **Symptom:** Write approval made demos require a TTY.  
