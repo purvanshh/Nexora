@@ -98,10 +98,31 @@ def build_summary(
         return "\n".join(lines)
 
     if kind == "leave":
-        emp_id = facts.get("employee_id") or "NOT EXTRACTED"
-        start = facts.get("leave_start") or facts.get("start_date") or "NOT EXTRACTED"
-        end = facts.get("leave_end") or facts.get("end_date") or "NOT EXTRACTED"
-        reason = facts.get("leave_reason") or facts.get("reason") or "NOT EXTRACTED"
+        expected = details.get("leave_expected") if isinstance(details, dict) else None
+        expected = expected if isinstance(expected, dict) else {}
+        emp_id = (
+            facts.get("employee_id")
+            or expected.get("employee_id")
+            or "NOT EXTRACTED"
+        )
+        start = (
+            facts.get("leave_start")
+            or facts.get("start_date")
+            or expected.get("start_date")
+            or "NOT EXTRACTED"
+        )
+        end = (
+            facts.get("leave_end")
+            or facts.get("end_date")
+            or expected.get("end_date")
+            or "NOT EXTRACTED"
+        )
+        reason = (
+            facts.get("leave_reason")
+            or facts.get("reason")
+            or expected.get("reason")
+            or "NOT EXTRACTED"
+        )
         leave_snap = _compact(
             details.get("leave_match"),
             ["id", "employee_id", "start_date", "end_date", "reason", "status"],

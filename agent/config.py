@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     chaos: int = 0
     # Pause before mutating API calls (POST/PUT/PATCH/DELETE) for human approve/reject.
     require_write_approval: bool = True
+    # When true, auto-answer approve on write gates (for CI / headless reviewers).
+    auto_approve: bool = False
     workspace_dir: Path = Path("./workspace")
     trace_dir: Path = Path("./traces")
     log_level: str = "INFO"

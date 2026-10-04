@@ -9,6 +9,7 @@ _CALLER_CHAOS="${CHAOS-}"
 _CALLER_HEADLESS="${HEADLESS-}"
 _CALLER_MOCK_URL="${MOCK_APP_URL-}"
 _CALLER_PERMANENT="${PERMANENT_FAIL-}"
+_CALLER_AUTO_APPROVE="${AUTO_APPROVE-}"
 
 if [[ -f "$ROOT/.env" ]]; then
   set -a
@@ -30,18 +31,22 @@ fi
 if [[ -n "${_CALLER_PERMANENT}" ]]; then
   export PERMANENT_FAIL="${_CALLER_PERMANENT}"
 fi
+if [[ -n "${_CALLER_AUTO_APPROVE}" ]]; then
+  export AUTO_APPROVE="${_CALLER_AUTO_APPROVE}"
+fi
 
 export MOCK_APP_URL="${MOCK_APP_URL:-http://127.0.0.1:8000}"
 export HEADLESS="${HEADLESS:-true}"
 export CHAOS="${CHAOS:-0}"
 export PERMANENT_FAIL="${PERMANENT_FAIL:-0}"
+export AUTO_APPROVE="${AUTO_APPROVE:-0}"
 
 if [[ -z "${OPENAI_API_KEY:-}" || "${OPENAI_API_KEY}" == sk-... ]]; then
   echo "OPENAI_API_KEY missing. Copy .env.example → .env and set your key." >&2
   exit 2
 fi
 
-echo "Starting demo (CHAOS=${CHAOS}, PERMANENT_FAIL=${PERMANENT_FAIL}, HEADLESS=${HEADLESS}, MOCK_APP_URL=${MOCK_APP_URL})"
+echo "Starting demo (CHAOS=${CHAOS}, PERMANENT_FAIL=${PERMANENT_FAIL}, AUTO_APPROVE=${AUTO_APPROVE}, HEADLESS=${HEADLESS}, MOCK_APP_URL=${MOCK_APP_URL})"
 
 uv run python scripts/seed_reset.py
 

@@ -56,3 +56,25 @@ async def test_unclear_defaults_to_reject_on_approval_menu() -> None:
     assert second.ok is True
     assert second.data is not None
     assert second.data["normalized"] == "reject"
+
+
+@pytest.mark.asyncio
+async def test_free_text_clarification_mode() -> None:
+    tool = AskUserTool(callback=lambda q, o: "use Acme Corp, not Acme Corporation")
+    obs = await tool.run(AskUserArgs(question="Which sender?", options=[]))
+    assert obs.ok is True
+    assert obs.data is not None
+    assert obs.data["mode"] == "clarify"
+    assert "Acme Corp" in obs.data["normalized"]
+
+
+@pytest.mark.asyncio
+async def test_auto_approve_answers_write_gate() -> None:
+    tool = AskUserTool(auto_approve=True)
+    obs = await tool.run(
+        AskUserArgs(question="Write?", options=list(APPROVAL_OPTIONS))
+    )
+    assert obs.ok is True
+    assert obs.data is not None
+    assert obs.data["normalized"] == "approve"
+    assert obs.data.get("note") == "auto_approve"

@@ -106,6 +106,7 @@ async def test_e2e_leave_write(
     assert result.status == "success"
     assert result.verification is not None
     assert result.verification.passed is True
+    assert any("Exactly one leave record" in c for c in result.verification.checks)
     assert "leave" in result.summary.lower()
 
     async with httpx.AsyncClient(base_url=mock_app) as client:

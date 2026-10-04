@@ -431,9 +431,10 @@ async def run(
                 break
 
             if tool_call.tool == "ask_user":
-                # Ensure menu options are always present.
+                # None → escalation menu. [] → free-text clarify. else → that menu.
                 args = dict(tool_call.args)
-                args.setdefault("options", list(MENU_OPTIONS))
+                if args.get("options") is None:
+                    args["options"] = list(MENU_OPTIONS)
                 tool_call = ToolCall(
                     tool="ask_user",
                     args=args,

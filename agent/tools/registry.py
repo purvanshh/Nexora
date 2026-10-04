@@ -91,7 +91,9 @@ def get_default_registry(
             evidence_dir=evidence_dir or (settings.trace_dir / "browser"),
         )
     )
-    registry.register(AskUserTool(callback=ask_callback))
+    registry.register(
+        AskUserTool(callback=ask_callback, auto_approve=settings.auto_approve)
+    )
     registry.register(
         _MetaTool(
             "remember",

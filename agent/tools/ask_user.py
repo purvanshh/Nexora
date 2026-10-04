@@ -36,7 +36,11 @@ class AskUserArgs(BaseModel):
     question: str
     options: list[str] | None = Field(
         default=None,
-        description="Optional multiple-choice options",
+        description=(
+            "Menu choices. Omit for retry/skip/abort escalation. "
+            "Pass an empty list [] for free-text clarification "
+            "(ambiguous sender, missing fields, etc.)."
+        ),
     )
 
 
@@ -53,13 +57,21 @@ def format_menu(options: list[str]) -> str:
 class AskUserTool(Tool):
     name = "ask_user"
     description = (
-        "Ask the human via a constrained menu. Use for escalation "
-        "(retry/skip/abort) or write approval (approve/reject)."
+        "Ask the human. Use a menu for write approval (approve/reject) or "
+        "escalation (retry/skip/abort). Pass options=[] for free-text "
+        "clarification when the task is ambiguous (e.g. zero or multiple "
+        "matching senders)."
     )
     args_schema = AskUserArgs
 
-    def __init__(self, callback: AskCallback | None = None) -> None:
+    def __init__(
+        self,
+        callback: AskCallback | None = None,
+        *,
+        auto_approve: bool = False,
+    ) -> None:
         self.callback = callback
+        self.auto_approve = auto_approve
         self._unclear_count = 0
 
     @staticmethod
@@ -67,17 +79,13 @@ class AskUserTool(Tool):
         text = raw.strip().lower()
         if not text or not options:
             return None
-        # Exact match against offered options first.
         for opt in options:
             if text == opt.lower():
                 return opt
-        # First-letter / "(x)ption" against offered options (so "a" = approve
-        # when approve is offered, abort when abort is offered).
         for opt in options:
             initial = opt.lower()[0]
             if text == initial or text.startswith(initial + ")"):
                 return opt
-        # Global aliases only if they land in the offered set.
         if text in _ALIASES:
             mapped = _ALIASES[text]
             for opt in options:
@@ -88,26 +96,88 @@ class AskUserTool(Tool):
     async def run(self, args: BaseModel) -> Observation:
         assert isinstance(args, AskUserArgs)
         started = time.perf_counter()
-        options = args.options or list(MENU_OPTIONS)
+        # None → escalation menu. [] → free-text clarification. else → that menu.
+        free_text = args.options is not None and len(args.options) == 0
+        options = list(MENU_OPTIONS) if args.options is None else list(args.options)
         try:
-            if self.callback is not None:
-                answer = self.callback(args.question, options)
+            if (
+                self.auto_approve
+                and not free_text
+                and any(o.lower() == "approve" for o in options)
+            ):
+                raw = "approve"
+                normalized: str | None = "approve"
+                note = "auto_approve"
+            elif self.callback is not None:
+                # Callback sees [] for free-text so tests can distinguish modes.
+                cb_options: list[str] | None = [] if free_text else options
+                answer = self.callback(args.question, cb_options)
                 if hasattr(answer, "__await__"):
                     answer = await answer  # type: ignore[misc]
+                raw = str(answer)
+                if free_text:
+                    normalized = raw.strip() or None
+                    note = None
+                    if not normalized:
+                        return Observation(
+                            ok=False,
+                            error="Empty clarification answer.",
+                            data={
+                                "question": args.question,
+                                "answer": raw,
+                                "options": [],
+                                "normalized": None,
+                                "mode": "clarify",
+                            },
+                            duration_ms=int((time.perf_counter() - started) * 1000),
+                        )
+                else:
+                    normalized = self.normalize_answer(raw, options)
+                    note = None
+            elif free_text:
+                raw = input(f"{args.question}\n(Free text clarification)\n> ")
+                normalized = str(raw).strip() or None
+                note = None
+                if not normalized:
+                    return Observation(
+                        ok=False,
+                        error="Empty clarification answer.",
+                        data={
+                            "question": args.question,
+                            "answer": raw,
+                            "options": [],
+                            "normalized": None,
+                            "mode": "clarify",
+                        },
+                        duration_ms=int((time.perf_counter() - started) * 1000),
+                    )
             else:
                 prompt = (
                     f"{args.question}\n"
                     f"Choose one: {format_menu(options)}\n"
                     f"Options: {', '.join(options)}\n> "
                 )
-                answer = input(prompt)
+                raw = str(input(prompt))
+                normalized = self.normalize_answer(raw, options)
+                note = None
 
-            raw = str(answer)
-            normalized = self.normalize_answer(raw, options)
+            if free_text:
+                self._unclear_count = 0
+                return Observation(
+                    ok=True,
+                    data={
+                        "question": args.question,
+                        "answer": raw,
+                        "normalized": normalized,
+                        "options": [],
+                        "mode": "clarify",
+                    },
+                    duration_ms=int((time.perf_counter() - started) * 1000),
+                )
+
             if normalized is None:
                 self._unclear_count += 1
                 if self._unclear_count >= 2:
-                    # Prefer reject/abort as the safe default when offered.
                     if "reject" in options:
                         normalized = "reject"
                     elif "abort" in options:
@@ -132,7 +202,6 @@ class AskUserTool(Tool):
                     )
             else:
                 self._unclear_count = 0
-                note = None
 
             data = {
                 "question": args.question,

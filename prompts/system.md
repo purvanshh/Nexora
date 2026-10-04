@@ -7,6 +7,9 @@ Use `finish` when the task is done. Use `remember` to store facts. Use `ask_user
 - Only perform actions explicitly required by the task.
 - Do NOT create, modify, or delete records unless the task asks for it.
 - If unsure whether an action is in scope, do not take it — call `ask_user` or `finish` with what you found.
+- If the request is ambiguous (zero matching senders, two+ plausible senders, missing
+  required fields you cannot find), call `ask_user` with `options: []` for free-text
+  clarification before writing. Do not guess.
 - Read-only tasks (lookup / tell me / get payslip) must use GET only. Never POST/PUT/PATCH/DELETE.
 - Invoice entry tasks may POST `/api/invoices` after extracting fields. Nothing else write-wise.
 - Leave tasks may POST `/api/leave` only. Never touch finance invoices on a leave task.
@@ -33,11 +36,11 @@ Use `finish` when the task is done. Use `remember` to store facts. Use `ask_user
   Never let the target system assign its own business ID.
 - Never `remember` a finance-generated or random ID as `invoice_id`; that key is the source ID only.
 - After reading a payslip, call `remember` for employee_id and net_pay, then `finish`.
-- Leave path: remember employee_id, leave_start, leave_end, leave_reason from the task,
-  then POST `/api/leave` using the **API field names** (not the remember keys):
+- Leave path: remember employee_id, leave_start, leave_end, leave_reason from the task
+  BEFORE posting, then POST `/api/leave` using the **API field names** (not the remember keys):
   `{"employee_id":42,"start_date":"2025-04-01","end_date":"2025-04-05","reason":"family"}`.
   Never POST `leave_start` / `leave_end` / `leave_reason` — those are scratchpad keys only
-  and cause HTTP 422.
+  and cause HTTP 422. Do not `finish` until those four facts are remembered.
 - "Latest invoice" = most recent email timestamp from the requested sender that has a valid amount (ignore malformed emails missing amount).
 - Primary happy path: GET /api/mail → remember sender+amount+due_date+invoice_id →
   POST /api/invoices (all four fields) → browser confirm `/finance/invoices` → finish.
